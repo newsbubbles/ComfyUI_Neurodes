@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Written by the Save Weights / Export Code nodes when run outside ComfyUI
+neurodes/**/*.pt
+output/
+
+# Local dev config: absolute paths to one machine's ComfyUI
+.claude/

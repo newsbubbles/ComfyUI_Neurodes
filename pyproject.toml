@@ -1,0 +1,20 @@
+[project]
+name = "neurodes"
+description = "Neural network architecture as a ComfyUI node graph: typed tensors on the wires, live shape inference, real training, and a PyTorch file at the end."
+version = "0.1.0"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+
+# Nothing here on purpose. torch, numpy and Pillow are already hard requirements of
+# ComfyUI itself; torchvision is optional and only needed for the MNIST/CIFAR node,
+# which says so plainly if it is missing.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/newsbubbles/ComfyUI_Neurodes"
+
+[tool.comfy]
+DisplayName = "neurodes"
+PublisherId = "newsbubbles"
+Icon = ""
+includes = []

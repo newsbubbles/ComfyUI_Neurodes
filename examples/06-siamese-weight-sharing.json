@@ -1,0 +1,1633 @@
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "revision": 0,
+  "last_node_id": 19,
+  "last_link_id": 19,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "NeuroToyDataset",
+      "pos": [
+        0,
+        60
+      ],
+      "size": [
+        270,
+        218
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "pattern",
+          "name": "pattern",
+          "type": "COMBO",
+          "widget": {
+            "name": "pattern"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "points",
+          "name": "points",
+          "type": "INT",
+          "widget": {
+            "name": "points"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "noise",
+          "name": "noise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "noise"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "validation_split",
+          "name": "validation_split",
+          "type": "FLOAT",
+          "widget": {
+            "name": "validation_split"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "links": [
+            1,
+            2
+          ]
+        },
+        {
+          "localized_name": "input shape",
+          "name": "input shape",
+          "type": "NEURO_SHAPE",
+          "links": null
+        },
+        {
+          "localized_name": "classes",
+          "name": "classes",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroToyDataset"
+      },
+      "widgets_values": [
+        "two moons",
+        900,
+        0.12,
+        0.25,
+        1109004875,
+        "randomize"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "NeuroDatasetPairs",
+      "pos": [
+        340,
+        60
+      ],
+      "size": [
+        270,
+        146
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "link": 1
+        },
+        {
+          "localized_name": "pairs",
+          "name": "pairs",
+          "type": "INT",
+          "widget": {
+            "name": "pairs"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "links": [
+            14,
+            18
+          ]
+        },
+        {
+          "localized_name": "input shape",
+          "name": "input shape",
+          "type": "NEURO_SHAPE",
+          "links": [
+            3,
+            4
+          ]
+        },
+        {
+          "localized_name": "train examples",
+          "name": "train examples",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroDatasetPairs"
+      },
+      "widgets_values": [
+        3,
+        1419895604,
+        "randomize"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "NeuroPlotDataset",
+      "pos": [
+        340,
+        400
+      ],
+      "size": [
+        270,
+        318
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "link": 2
+        },
+        {
+          "localized_name": "size",
+          "name": "size",
+          "type": "INT",
+          "widget": {
+            "name": "size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroPlotDataset"
+      },
+      "widgets_values": [
+        460,
+        true,
+        "neurodes/pairs_data"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "NeuroInput",
+      "pos": [
+        700,
+        60
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "shape",
+          "name": "shape",
+          "type": "STRING,NEURO_SHAPE",
+          "widget": {
+            "name": "shape"
+          },
+          "link": 3
+        },
+        {
+          "localized_name": "name",
+          "name": "name",
+          "type": "STRING",
+          "widget": {
+            "name": "name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "dtype",
+          "name": "dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "dtype"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroInput"
+      },
+      "widgets_values": [
+        "B, 2",
+        "left",
+        "float32"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "NeuroInput",
+      "pos": [
+        700,
+        280
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "shape",
+          "name": "shape",
+          "type": "STRING,NEURO_SHAPE",
+          "widget": {
+            "name": "shape"
+          },
+          "link": 4
+        },
+        {
+          "localized_name": "name",
+          "name": "name",
+          "type": "STRING",
+          "widget": {
+            "name": "name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "dtype",
+          "name": "dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "dtype"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroInput"
+      },
+      "widgets_values": [
+        "B, 2",
+        "right",
+        "float32"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "NeuroLayerMlpBlock",
+      "pos": [
+        1030,
+        60
+      ],
+      "size": [
+        270,
+        226
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "x",
+          "name": "x",
+          "type": "NEURO_TENSOR",
+          "link": 5
+        },
+        {
+          "localized_name": "hidden",
+          "name": "hidden",
+          "type": "INT",
+          "widget": {
+            "name": "hidden"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "out_features",
+          "name": "out_features",
+          "type": "INT",
+          "widget": {
+            "name": "out_features"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "depth",
+          "name": "depth",
+          "type": "INT",
+          "widget": {
+            "name": "depth"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "activation",
+          "name": "activation",
+          "type": "COMBO",
+          "widget": {
+            "name": "activation"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "dropout",
+          "name": "dropout",
+          "type": "FLOAT",
+          "widget": {
+            "name": "dropout"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "norm",
+          "name": "norm",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "norm"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "share",
+          "name": "share",
+          "type": "STRING",
+          "widget": {
+            "name": "share"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "label",
+          "name": "label",
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroLayerMlpBlock"
+      },
+      "widgets_values": [
+        32,
+        16,
+        2,
+        "relu",
+        0,
+        false,
+        "tower",
+        "tower"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "NeuroLayerMlpBlock",
+      "pos": [
+        1030,
+        440
+      ],
+      "size": [
+        270,
+        226
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "x",
+          "name": "x",
+          "type": "NEURO_TENSOR",
+          "link": 6
+        },
+        {
+          "localized_name": "hidden",
+          "name": "hidden",
+          "type": "INT",
+          "widget": {
+            "name": "hidden"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "out_features",
+          "name": "out_features",
+          "type": "INT",
+          "widget": {
+            "name": "out_features"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "depth",
+          "name": "depth",
+          "type": "INT",
+          "widget": {
+            "name": "depth"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "activation",
+          "name": "activation",
+          "type": "COMBO",
+          "widget": {
+            "name": "activation"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "dropout",
+          "name": "dropout",
+          "type": "FLOAT",
+          "widget": {
+            "name": "dropout"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "norm",
+          "name": "norm",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "norm"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "share",
+          "name": "share",
+          "type": "STRING",
+          "widget": {
+            "name": "share"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "label",
+          "name": "label",
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroLayerMlpBlock"
+      },
+      "widgets_values": [
+        32,
+        16,
+        2,
+        "relu",
+        0,
+        false,
+        "tower",
+        "tower"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "NeuroLayerSubtract",
+      "pos": [
+        1380,
+        60
+      ],
+      "size": [
+        270,
+        102
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "x1",
+          "name": "x1",
+          "type": "NEURO_TENSOR",
+          "link": 7
+        },
+        {
+          "localized_name": "x2",
+          "name": "x2",
+          "type": "NEURO_TENSOR",
+          "link": 8
+        },
+        {
+          "localized_name": "share",
+          "name": "share",
+          "type": "STRING",
+          "widget": {
+            "name": "share"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "label",
+          "name": "label",
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            9,
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroLayerSubtract"
+      },
+      "widgets_values": [
+        "",
+        "gap"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "NeuroLayerMultiply",
+      "pos": [
+        1660,
+        60
+      ],
+      "size": [
+        270,
+        122
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "tensor0",
+          "localized_name": "tensors.tensor0",
+          "name": "tensors.tensor0",
+          "type": "NEURO_TENSOR",
+          "link": 9
+        },
+        {
+          "label": "tensor1",
+          "localized_name": "tensors.tensor1",
+          "name": "tensors.tensor1",
+          "type": "NEURO_TENSOR",
+          "link": 10
+        },
+        {
+          "label": "tensor2",
+          "localized_name": "tensors.tensor2",
+          "name": "tensors.tensor2",
+          "shape": 7,
+          "type": "NEURO_TENSOR",
+          "link": null
+        },
+        {
+          "localized_name": "share",
+          "name": "share",
+          "type": "STRING",
+          "widget": {
+            "name": "share"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "label",
+          "name": "label",
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroLayerMultiply"
+      },
+      "widgets_values": [
+        "",
+        "squared"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "NeuroLayerLinear",
+      "pos": [
+        1940,
+        60
+      ],
+      "size": [
+        270,
+        130
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "x",
+          "name": "x",
+          "type": "NEURO_TENSOR",
+          "link": 11
+        },
+        {
+          "localized_name": "units",
+          "name": "units",
+          "type": "INT",
+          "widget": {
+            "name": "units"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "bias",
+          "name": "bias",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "bias"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "share",
+          "name": "share",
+          "type": "STRING",
+          "widget": {
+            "name": "share"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "label",
+          "name": "label",
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroLayerLinear"
+      },
+      "widgets_values": [
+        2,
+        true,
+        "",
+        "same_or_not"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "NeuroBuildModel",
+      "pos": [
+        2270,
+        60
+      ],
+      "size": [
+        270,
+        102
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "output0",
+          "localized_name": "outputs.output0",
+          "name": "outputs.output0",
+          "type": "NEURO_TENSOR",
+          "link": 12
+        },
+        {
+          "label": "output1",
+          "localized_name": "outputs.output1",
+          "name": "outputs.output1",
+          "shape": 7,
+          "type": "NEURO_TENSOR",
+          "link": null
+        },
+        {
+          "localized_name": "name",
+          "name": "name",
+          "type": "STRING",
+          "widget": {
+            "name": "name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "verify",
+          "name": "verify",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "verify"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "links": [
+            13,
+            19
+          ]
+        },
+        {
+          "localized_name": "summary",
+          "name": "summary",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroBuildModel"
+      },
+      "widgets_values": [
+        "Siamese",
+        true
+      ]
+    },
+    {
+      "id": 12,
+      "type": "NeuroTrainer",
+      "pos": [
+        2270,
+        230
+      ],
+      "size": [
+        270,
+        274
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "epochs",
+          "name": "epochs",
+          "type": "INT",
+          "widget": {
+            "name": "epochs"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "early_stopping",
+          "name": "early_stopping",
+          "type": "INT",
+          "widget": {
+            "name": "early_stopping"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "batch_size",
+          "name": "batch_size",
+          "type": "INT",
+          "widget": {
+            "name": "batch_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "learning_rate",
+          "name": "learning_rate",
+          "type": "FLOAT",
+          "widget": {
+            "name": "learning_rate"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "optimizer",
+          "name": "optimizer",
+          "type": "COMBO",
+          "widget": {
+            "name": "optimizer"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "loss",
+          "name": "loss",
+          "type": "COMBO",
+          "widget": {
+            "name": "loss"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "weight_decay",
+          "name": "weight_decay",
+          "type": "FLOAT",
+          "widget": {
+            "name": "weight_decay"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "grad_clip",
+          "name": "grad_clip",
+          "type": "FLOAT",
+          "widget": {
+            "name": "grad_clip"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "device",
+          "name": "device",
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "shuffle",
+          "name": "shuffle",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "shuffle"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "trainer",
+          "name": "trainer",
+          "type": "NEURO_TRAINER",
+          "links": [
+            15
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroTrainer"
+      },
+      "widgets_values": [
+        80,
+        15,
+        64,
+        0.02,
+        "adam",
+        "auto",
+        0,
+        0,
+        "auto",
+        true
+      ]
+    },
+    {
+      "id": 13,
+      "type": "NeuroTrain",
+      "pos": [
+        2600,
+        60
+      ],
+      "size": [
+        270,
+        146
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "link": 13
+        },
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "link": 14
+        },
+        {
+          "localized_name": "trainer",
+          "name": "trainer",
+          "type": "NEURO_TRAINER",
+          "link": 15
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "live_preview",
+          "name": "live_preview",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "live_preview"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "trained model",
+          "name": "trained model",
+          "type": "NEURO_MODEL",
+          "links": [
+            17
+          ]
+        },
+        {
+          "localized_name": "history",
+          "name": "history",
+          "type": "NEURO_HISTORY",
+          "links": [
+            16
+          ]
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroTrain"
+      },
+      "widgets_values": [
+        37957023,
+        "randomize",
+        true
+      ]
+    },
+    {
+      "id": 14,
+      "type": "NeuroPlotAccuracy",
+      "pos": [
+        2940,
+        60
+      ],
+      "size": [
+        270,
+        130
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "history",
+          "name": "history",
+          "type": "NEURO_HISTORY",
+          "link": 16
+        },
+        {
+          "localized_name": "width",
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "height",
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroPlotAccuracy"
+      },
+      "widgets_values": [
+        720,
+        440,
+        true,
+        "neurodes/siamese_accuracy"
+      ]
+    },
+    {
+      "id": 15,
+      "type": "NeuroPlotConfusion",
+      "pos": [
+        2940,
+        380
+      ],
+      "size": [
+        270,
+        150
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "link": 17
+        },
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "link": 18
+        },
+        {
+          "localized_name": "split",
+          "name": "split",
+          "type": "COMBO",
+          "widget": {
+            "name": "split"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "size",
+          "name": "size",
+          "type": "INT",
+          "widget": {
+            "name": "size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "localized_name": "accuracy",
+          "name": "accuracy",
+          "type": "FLOAT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroPlotConfusion"
+      },
+      "widgets_values": [
+        "validation",
+        460,
+        true,
+        "neurodes/siamese_confusion"
+      ]
+    },
+    {
+      "id": 16,
+      "type": "NeuroModelSummary",
+      "pos": [
+        2940,
+        700
+      ],
+      "size": [
+        270,
+        122
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "link": 19
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "text",
+          "name": "text",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "localized_name": "parameters",
+          "name": "parameters",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroModelSummary"
+      },
+      "widgets_values": [
+        false,
+        "neurodes/summary"
+      ]
+    },
+    {
+      "id": 17,
+      "type": "MarkdownNote",
+      "pos": [
+        0,
+        -560
+      ],
+      "size": [
+        1000,
+        440
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "## A Siamese network, and what weight sharing is for\n\nThis model never learns the classes. It learns a **comparison** — two things go in and one\nbit comes out: *are these the same?*\n\nThat is why it can be asked about classes it has never seen, and it is the shape behind\nface verification, signature checking and one-shot learning.\n\nThe trick is that both towers are **one set of weights, used twice**. Forking a wire\nduplicates data, not weights, so the two MLP Block nodes carry the same `share` tag,\n`tower`. Give them different tags and you get two independent towers that see the world\ndifferently, and the comparison stops meaning anything. The summary says\n`MLP Block (shared)` on the second one."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 18,
+      "type": "MarkdownNote",
+      "pos": [
+        1030,
+        -560
+      ],
+      "size": [
+        640,
+        440
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "### Two inputs, not one\n\n**Dataset As Pairs** draws pairs from a labelled dataset — half from the same class, half\nfrom different ones, so 50% is chance and the accuracy means something.\n\nIt hands them over as **two separate inputs**, which is why there are two Input nodes here\nand why both take their shape from the same socket.\n\nEverywhere else in this pack a model takes one thing. This is the case that needs two, and\nthe Train node feeds them in the order the Input nodes were traced: `left`, then\n`right`."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 19,
+      "type": "MarkdownNote",
+      "pos": [
+        1380,
+        560
+      ],
+      "size": [
+        640,
+        320
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "### Comparing without being told how\n\n**Subtract**, then **Multiply by itself**: the squared difference along each of the 16\ndimensions the tower learned.\n\nThe Linear on the end turns those 16 numbers into \"same\" or \"different\", so the network\ndecides which parts of the comparison matter instead of being handed a distance formula."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "NEURO_DATASET"
+    ],
+    [
+      2,
+      1,
+      0,
+      3,
+      0,
+      "NEURO_DATASET"
+    ],
+    [
+      3,
+      2,
+      1,
+      4,
+      0,
+      "NEURO_SHAPE"
+    ],
+    [
+      4,
+      2,
+      1,
+      5,
+      0,
+      "NEURO_SHAPE"
+    ],
+    [
+      5,
+      4,
+      0,
+      6,
+      0,
+      "NEURO_TENSOR"
+    ],
+    [
+      6,
+      5,
+      0,
+      7,
+      0,
+      "NEURO_TENSOR"
+    ],
+    [
+      7,
+      6,
+      0,
+      8,
+      0,
+      "NEURO_TENSOR"
+    ],
+    [
+      8,
+      7,
+      0,
+      8,
+      1,
+      "NEURO_TENSOR"
+    ],
+    [
+      9,
+      8,
+      0,
+      9,
+      0,
+      "NEURO_TENSOR"
+    ],
+    [
+      10,
+      8,
+      0,
+      9,
+      1,
+      "NEURO_TENSOR"
+    ],
+    [
+      11,
+      9,
+      0,
+      10,
+      0,
+      "NEURO_TENSOR"
+    ],
+    [
+      12,
+      10,
+      0,
+      11,
+      0,
+      "NEURO_TENSOR"
+    ],
+    [
+      13,
+      11,
+      0,
+      13,
+      0,
+      "NEURO_MODEL"
+    ],
+    [
+      14,
+      2,
+      0,
+      13,
+      1,
+      "NEURO_DATASET"
+    ],
+    [
+      15,
+      12,
+      0,
+      13,
+      2,
+      "NEURO_TRAINER"
+    ],
+    [
+      16,
+      13,
+      1,
+      14,
+      0,
+      "NEURO_HISTORY"
+    ],
+    [
+      17,
+      13,
+      0,
+      15,
+      0,
+      "NEURO_MODEL"
+    ],
+    [
+      18,
+      2,
+      0,
+      15,
+      1,
+      "NEURO_DATASET"
+    ],
+    [
+      19,
+      11,
+      0,
+      16,
+      0,
+      "NEURO_MODEL"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "1 · Pairs — half the same, half not",
+      "bounding": [
+        -30,
+        -2,
+        670,
+        538
+      ],
+      "color": "#3f5159",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "2 · One tower, used twice",
+      "bounding": [
+        670,
+        -2,
+        660,
+        698
+      ],
+      "color": "#354f3a",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "3 · Compare",
+      "bounding": [
+        1350,
+        -2,
+        890,
+        222
+      ],
+      "color": "#593930",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "4 · Train and score",
+      "bounding": [
+        2240,
+        -2,
+        1000,
+        854
+      ],
+      "color": "#444a70",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 1.4000000000000008,
+      "offset": [
+        71.84768512936435,
+        -9.148426041716169
+      ]
+    }
+  },
+  "version": 0.4
+}
