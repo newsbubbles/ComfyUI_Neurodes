@@ -32,10 +32,12 @@ class DataBundle:
     x_val: torch.Tensor
     y_val: torch.Tensor
     task: str = "classification"
-    """``classification``, ``regression`` or ``reconstruction``.
+    """``classification``, ``regression``, ``reconstruction`` or ``discovery``.
 
     Decides the default loss, which metrics mean anything, and what the training node
-    checks before it starts.
+    checks before it starts. ``discovery`` is the odd one out: it has no target at all, and
+    what replaces the target is a statement about what a good *answer* looks like rather
+    than about what the answer is.
     """
 
     classes: tuple[str, ...] = ()
@@ -59,7 +61,7 @@ class DataBundle:
     them wrong.
     """
 
-    TASKS = ("classification", "regression", "reconstruction")
+    TASKS = ("classification", "regression", "reconstruction", "discovery")
 
     def __post_init__(self):
         if self.task not in self.TASKS:
@@ -124,7 +126,8 @@ class DataBundle:
         ]
         for i, shape in enumerate(self.input_shapes[1:], start=2):
             lines.append(f"  input {i}     {shape}")
-        lines.append(f"  target      {self.target_shape}")
+        lines.append("  target      none — nothing here says what the answer should be"
+                     if self.task == "discovery" else f"  target      {self.target_shape}")
         if self.task == "classification":
             lines.append(f"  classes     {self.n_classes}" +
                          (f"  ({', '.join(self.classes)})" if self.classes else ""))

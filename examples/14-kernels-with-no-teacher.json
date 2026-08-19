@@ -1,0 +1,1307 @@
+{
+  "id": "00000000-0000-0000-0000-00000000000e",
+  "revision": 0,
+  "last_node_id": 15,
+  "last_link_id": 13,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "MarkdownNote",
+      "pos": [
+        -40,
+        -1180
+      ],
+      "size": [
+        1080,
+        400
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "# Kernels with no teacher\n\nEvery other example in this pack shows the network the right answer. This one has no right\nanswer anywhere in it — no labels, no target image, nothing to copy. It has **one\nphotograph** and a statement about what a good filter *does*.\n\nWhat comes out are oriented edge detectors, at a range of angles and sizes. The same small\nalphabet that falls out of sparse coding (Olshausen & Field, 1996), out of ICA on natural\nscenes (Bell & Sejnowski, 1997), out of the first layer of essentially any convolutional\nnet trained on photographs — and much the same as what has been measured in mammalian\nprimary visual cortex.\n\nNobody wrote the word \"edge\" anywhere in this graph. **Edges are simply what is left** when\nyou ask for a filter whose response to a photograph is *rarely* large.\n\nLoad your own picture into the LoadImage node. The alphabet changes with it: a face gives\nyou different letters than a brick wall, and a screenshot of text gives you strokes."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 2,
+      "type": "MarkdownNote",
+      "pos": [
+        -40,
+        620
+      ],
+      "size": [
+        620,
+        660
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "## Why not just \"make the histogram change a lot\"?\n\nThat is the obvious idea, and it is worth running once. Set **objective** to\n`histogram change` and press run. You get sixteen tiles of static, and the report says so:\n\n```\nsparsity   0.619   (untrained: 0.621)\nloudness   0.039\ndistinctness 0.904\n```\n\nUntrained kernels score **0.621** on this picture. Trained ones score **0.619**. Nothing was\nlearned. Two separate things are wrong, and they are worth separating.\n\n**It is not blind to scale.** \"How different is the histogram\" changes if you multiply the\nresponse by a constant — so the optimiser optimises the constant and leaves the filter\nalone. On mean-centred patches the cheapest histogram maximally unlike a photograph's is a\nsingle spike at zero, so the bank **switches itself off**: that `loudness 0.039` is a\nresponse 26 times *smaller* than the input. A filter bank whose best available move is to\noutput nothing at all.\n\nNow turn `diversity` up to 1 with `histogram change` still selected. It bolts the other way\n— **75x** the size of the input — and still learns nothing (0.623 against the same 0.621).\nEither way, the thing being trained is the volume knob.\n\n`sparse response` is a **ratio**, E|r| over the rms, so multiplying the response by\nanything at all leaves it exactly where it was. Gain earns nothing. The only way left to\nmove the score is to change the *shape* of the distribution — which was the interesting\npart all along."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 3,
+      "type": "MarkdownNote",
+      "pos": [
+        620,
+        620
+      ],
+      "size": [
+        600,
+        660
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "## Why `diversity` is not optional\n\nSet it to **0**, leave the objective on `sparse response`, and run again:\n\n```\nSparsity improved 0.077 on the\nuntrained floor — each kernel is quiet\nover most of the image and loud in a\nfew places...\nThe kernels have collapsed: on average\neach one is 87% the same as its\nnearest neighbour.\n```\n\nRead those two together, then look at the run you just did with diversity at 1.0: it gained\n**0.069**. The collapsed bank scores **better**. It is not a near miss or a rounding error\n— by the only measure being optimised, throwing away fifteen of your sixteen filters is an\nimprovement.\n\nOf course it is. Each kernel is scored **on its own**, so sixteen copies of the best answer\nare sixteen good answers as far as the objective can see. No better statistic fixes this,\nand **no amount of staring at the loss curve reveals it**, because the curve is genuinely\nlower in the collapsed run. The only thing that catches it is a measurement the objective\ndoes not make: how alike the kernels are.\n\n`diversity` adds the missing sentence — penalise any two kernels for responding to the same\npatches. 1.0 is a good default. Above about 3 they start to smear; at 10 they are worse on\nevery measure at once."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 4,
+      "type": "MarkdownNote",
+      "pos": [
+        1240,
+        620
+      ],
+      "size": [
+        620,
+        660
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "## What you are looking at\n\n**Filter Bank** is the one to look at first — every learned kernel slid across your actual\npicture, at full resolution. Sixteen readings of the same photograph, one per letter of the\nalphabet the model just invented. A bank learned from 12x12 patches runs unchanged over a\nmegapixel image, because that is what a convolution *is*: the same small operation applied\neverywhere, with no size baked in.\n\nSet its `layout` to **batch** and you get sixteen separate ComfyUI IMAGEs instead of one\ncontact sheet — feed them to an upscaler, a ControlNet, Video Combine, or img2img, exactly\nlike any other image in ComfyUI. Nothing downstream needs to know they came from a filter\nthat trained itself thirty seconds ago.\n\n**View Weights** — the kernels themselves, magnified. Light and dark lobes side by side at\nsome angle: that is an edge detector, and nobody put it there.\n\n**Response Histogram** — the distribution the objective is actually optimising, drawn\nagainst the same filters before training. Both curves are scaled to the same width first,\nbecause otherwise this would be a picture of gain. What is left is the shape: a taller\nspike at zero and fatter tails. Silent nearly everywhere, emphatic in a few places.\n\nOne number to distrust: the raw sparsity score. Photographs are already strongly\nnon-Gaussian before any filter touches them, so the report always quotes what **untrained**\nkernels score on *this* image. Random kernels score 0.798 on Gaussian noise exactly as\ntheory says, 0.62 on this beach, and **0.52 on a screenshot of text** — better than a\nwell-trained bank manages on the beach. Only the gap from the floor means anything."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 5,
+      "type": "LoadImage",
+      "pos": [
+        -40,
+        -720
+      ],
+      "size": [
+        300,
+        314
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "localized_name": "IMAGE",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1,
+            10
+          ]
+        },
+        {
+          "localized_name": "MASK",
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {},
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "NeuroImagePatches",
+      "pos": [
+        300,
+        -720
+      ],
+      "size": [
+        290,
+        190
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "localized_name": "patch_size",
+          "name": "patch_size",
+          "type": "INT",
+          "widget": {
+            "name": "patch_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "count",
+          "name": "count",
+          "type": "INT",
+          "widget": {
+            "name": "count"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "greyscale",
+          "name": "greyscale",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "greyscale"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "remove_mean",
+          "name": "remove_mean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "remove_mean"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "val_fraction",
+          "name": "val_fraction",
+          "type": "FLOAT",
+          "widget": {
+            "name": "val_fraction"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed control",
+          "name": "seed control",
+          "type": "COMBO",
+          "widget": {
+            "name": "seed control"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "links": [
+            2,
+            7,
+            12
+          ]
+        },
+        {
+          "localized_name": "input shape",
+          "name": "input shape",
+          "type": "NEURO_SHAPE",
+          "links": [
+            3
+          ]
+        },
+        {
+          "localized_name": "patches",
+          "name": "patches",
+          "type": "INT",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroImagePatches"
+      },
+      "widgets_values": [
+        12,
+        6000,
+        true,
+        true,
+        0.15,
+        0,
+        "fixed"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "NeuroPlotDataset",
+      "pos": [
+        300,
+        -470
+      ],
+      "size": [
+        290,
+        300
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "link": 2
+        },
+        {
+          "localized_name": "size",
+          "name": "size",
+          "type": "INT",
+          "widget": {
+            "name": "size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroPlotDataset"
+      },
+      "widgets_values": [
+        400,
+        false,
+        "neurodes/dataset"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "NeuroInput",
+      "pos": [
+        640,
+        -720
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "shape",
+          "name": "shape",
+          "type": "STRING",
+          "widget": {
+            "name": "shape"
+          },
+          "link": 3
+        },
+        {
+          "localized_name": "name",
+          "name": "name",
+          "type": "STRING",
+          "widget": {
+            "name": "name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "dtype",
+          "name": "dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "dtype"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroInput"
+      },
+      "widgets_values": [
+        "B, 1, 12, 12",
+        "patch",
+        "float32"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "NeuroLayerConv2d",
+      "pos": [
+        640,
+        -570
+      ],
+      "size": [
+        270,
+        250
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "x",
+          "name": "x",
+          "type": "NEURO_TENSOR",
+          "link": 4
+        },
+        {
+          "localized_name": "out_channels",
+          "name": "out_channels",
+          "type": "INT",
+          "widget": {
+            "name": "out_channels"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "kernel_size",
+          "name": "kernel_size",
+          "type": "STRING",
+          "widget": {
+            "name": "kernel_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "stride",
+          "name": "stride",
+          "type": "STRING",
+          "widget": {
+            "name": "stride"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "padding",
+          "name": "padding",
+          "type": "STRING",
+          "widget": {
+            "name": "padding"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "dilation",
+          "name": "dilation",
+          "type": "STRING",
+          "widget": {
+            "name": "dilation"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "groups",
+          "name": "groups",
+          "type": "INT",
+          "widget": {
+            "name": "groups"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "bias",
+          "name": "bias",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "bias"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "share",
+          "name": "share",
+          "type": "STRING",
+          "widget": {
+            "name": "share"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "label",
+          "name": "label",
+          "type": "STRING",
+          "widget": {
+            "name": "label"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "tensor",
+          "name": "tensor",
+          "type": "NEURO_TENSOR",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroLayerConv2d"
+      },
+      "widgets_values": [
+        16,
+        "12",
+        "1",
+        "valid",
+        "1",
+        1,
+        false,
+        "",
+        "bank"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "NeuroBuildModel",
+      "pos": [
+        640,
+        -270
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "outputs",
+          "name": "outputs",
+          "type": "COMFY_AUTOGROW_V3",
+          "link": 5
+        },
+        {
+          "localized_name": "name",
+          "name": "name",
+          "type": "STRING",
+          "widget": {
+            "name": "name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "verify",
+          "name": "verify",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "verify"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "links": [
+            6
+          ]
+        },
+        {
+          "localized_name": "summary",
+          "name": "summary",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroBuildModel"
+      },
+      "widgets_values": [
+        "KernelBank",
+        true
+      ]
+    },
+    {
+      "id": 11,
+      "type": "NeuroDiscover",
+      "pos": [
+        960,
+        -720
+      ],
+      "size": [
+        300,
+        330
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "link": 6
+        },
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "link": 7
+        },
+        {
+          "localized_name": "objective",
+          "name": "objective",
+          "type": "COMBO",
+          "widget": {
+            "name": "objective"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "diversity",
+          "name": "diversity",
+          "type": "FLOAT",
+          "widget": {
+            "name": "diversity"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "epochs",
+          "name": "epochs",
+          "type": "INT",
+          "widget": {
+            "name": "epochs"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "batch_size",
+          "name": "batch_size",
+          "type": "INT",
+          "widget": {
+            "name": "batch_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "learning_rate",
+          "name": "learning_rate",
+          "type": "FLOAT",
+          "widget": {
+            "name": "learning_rate"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed control",
+          "name": "seed control",
+          "type": "COMBO",
+          "widget": {
+            "name": "seed control"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "early_stopping",
+          "name": "early_stopping",
+          "type": "INT",
+          "widget": {
+            "name": "early_stopping"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "live_preview",
+          "name": "live_preview",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "live_preview"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "reset_weights",
+          "name": "reset_weights",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "reset_weights"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "trained model",
+          "name": "trained model",
+          "type": "NEURO_MODEL",
+          "links": [
+            8,
+            9,
+            11
+          ]
+        },
+        {
+          "localized_name": "history",
+          "name": "history",
+          "type": "NEURO_HISTORY",
+          "links": [
+            13
+          ]
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroDiscover"
+      },
+      "widgets_values": [
+        "sparse response",
+        1.0,
+        120,
+        512,
+        0.02,
+        0,
+        "fixed",
+        0,
+        true,
+        true
+      ]
+    },
+    {
+      "id": 12,
+      "type": "NeuroFilterBank",
+      "pos": [
+        1310,
+        -720
+      ],
+      "size": [
+        420,
+        560
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "link": 9
+        },
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 10
+        },
+        {
+          "localized_name": "layer",
+          "name": "layer",
+          "type": "STRING",
+          "widget": {
+            "name": "layer"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "remove_mean",
+          "name": "remove_mean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "remove_mean"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "layout",
+          "name": "layout",
+          "type": "COMBO",
+          "widget": {
+            "name": "layout"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "colormap",
+          "name": "colormap",
+          "type": "COMBO",
+          "widget": {
+            "name": "colormap"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "normalization",
+          "name": "normalization",
+          "type": "COMBO",
+          "widget": {
+            "name": "normalization"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "columns",
+          "name": "columns",
+          "type": "INT",
+          "widget": {
+            "name": "columns"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "links": []
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroFilterBank"
+      },
+      "widgets_values": [
+        "",
+        true,
+        "sheet",
+        "cold-hot",
+        "signed, robust",
+        4,
+        false,
+        "neurodes/filters"
+      ]
+    },
+    {
+      "id": 13,
+      "type": "NeuroPlotWeights",
+      "pos": [
+        1780,
+        -720
+      ],
+      "size": [
+        330,
+        420
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "link": 8
+        },
+        {
+          "localized_name": "layer",
+          "name": "layer",
+          "type": "STRING",
+          "widget": {
+            "name": "layer"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "size",
+          "name": "size",
+          "type": "INT",
+          "widget": {
+            "name": "size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": []
+        },
+        {
+          "localized_name": "available layers",
+          "name": "available layers",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroPlotWeights"
+      },
+      "widgets_values": [
+        "",
+        480,
+        false,
+        "neurodes/weights"
+      ]
+    },
+    {
+      "id": 14,
+      "type": "NeuroPlotResponses",
+      "pos": [
+        1780,
+        -260
+      ],
+      "size": [
+        330,
+        300
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "NEURO_MODEL",
+          "link": 11
+        },
+        {
+          "localized_name": "dataset",
+          "name": "dataset",
+          "type": "NEURO_DATASET",
+          "link": 12
+        },
+        {
+          "localized_name": "kernel",
+          "name": "kernel",
+          "type": "INT",
+          "widget": {
+            "name": "kernel"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "width",
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "height",
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": []
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroPlotResponses"
+      },
+      "widgets_values": [
+        -1,
+        720,
+        440,
+        false,
+        "neurodes/responses"
+      ]
+    },
+    {
+      "id": 15,
+      "type": "NeuroPlotLoss",
+      "pos": [
+        1310,
+        -120
+      ],
+      "size": [
+        420,
+        300
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "history",
+          "name": "history",
+          "type": "NEURO_HISTORY",
+          "link": 13
+        },
+        {
+          "localized_name": "log_scale",
+          "name": "log_scale",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "log_scale"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "width",
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "height",
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "save",
+          "name": "save",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NeuroPlotLoss"
+      },
+      "widgets_values": [
+        false,
+        720,
+        440,
+        false,
+        "neurodes/loss"
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      5,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      2,
+      6,
+      0,
+      7,
+      0,
+      "NEURO_DATASET"
+    ],
+    [
+      3,
+      6,
+      1,
+      8,
+      0,
+      "STRING"
+    ],
+    [
+      4,
+      8,
+      0,
+      9,
+      0,
+      "NEURO_TENSOR"
+    ],
+    [
+      5,
+      9,
+      0,
+      10,
+      0,
+      "COMFY_AUTOGROW_V3"
+    ],
+    [
+      6,
+      10,
+      0,
+      11,
+      0,
+      "NEURO_MODEL"
+    ],
+    [
+      7,
+      6,
+      0,
+      11,
+      1,
+      "NEURO_DATASET"
+    ],
+    [
+      8,
+      11,
+      0,
+      13,
+      0,
+      "NEURO_MODEL"
+    ],
+    [
+      9,
+      11,
+      0,
+      12,
+      0,
+      "NEURO_MODEL"
+    ],
+    [
+      10,
+      5,
+      0,
+      12,
+      1,
+      "IMAGE"
+    ],
+    [
+      11,
+      11,
+      0,
+      14,
+      0,
+      "NEURO_MODEL"
+    ],
+    [
+      12,
+      6,
+      0,
+      14,
+      1,
+      "NEURO_DATASET"
+    ],
+    [
+      13,
+      11,
+      1,
+      15,
+      0,
+      "NEURO_HISTORY"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "1 · One picture, cut into thousands of patches",
+      "bounding": [
+        -70,
+        -790,
+        700,
+        620
+      ],
+      "color": "#3f5159",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "2 · Sixteen empty kernels",
+      "bounding": [
+        610,
+        -790,
+        330,
+        590
+      ],
+      "color": "#3f5159",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "3 · Train with no answers — only a preference",
+      "bounding": [
+        930,
+        -790,
+        360,
+        360
+      ],
+      "color": "#59433f",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "4 · What it found — run these over your own picture",
+      "bounding": [
+        1280,
+        -790,
+        860,
+        1250
+      ],
+      "color": "#3f593f",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.62,
+      "offset": [
+        120,
+        1260
+      ]
+    }
+  },
+  "version": 0.4
+}

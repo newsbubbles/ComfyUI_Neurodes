@@ -311,4 +311,101 @@ class NeuroDeepDream(io.ComfyNode):
                             filename_prefix=filename_prefix)
 
 
-VISION_NODES = [NeuroCaptureActivations, NeuroActivationImage, NeuroDeepDream]
+class NeuroFilterBank(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="NeuroFilterBank",
+            display_name="Filter Bank",
+            category=CAT,
+            description="Slides every one of a layer's filters across a full-size picture "
+                        "and gives you one image per filter.\n\nCapture Activations shrinks "
+                        "the input to whatever the model was built for. This does not — a "
+                        "convolution is the same operation at any resolution, which is the "
+                        "single most useful property it has, and a bank of 12x12 kernels "
+                        "learned from patches can be run over a four-megapixel photograph "
+                        "unchanged.\n\nThe pairing this was built for is Discover Kernels: "
+                        "learn an alphabet from one image with no labels, then look at what "
+                        "each letter of it sees.",
+            search_aliases=["filter bank", "convolve", "apply filters", "kernels", "edge "
+                            "detector", "feature maps", "full resolution"],
+            inputs=[
+                Model.Input("model"),
+                io.Image.Input("image"),
+                io.String.Input("layer", default="", tooltip=_LAYER_HINT),
+                io.Boolean.Input("remove_mean", default=True,
+                                 tooltip="Subtract the picture's average brightness first, "
+                                         "matching how the patches were prepared. Makes "
+                                         "little difference to a learned filter, which is "
+                                         "usually close to zero-sum anyway."),
+                io.Combo.Input("layout", options=["batch", "sheet"], default="batch",
+                               tooltip="One image per filter, or all of them tiled into one."),
+                io.Combo.Input("colormap", options=list(R.COLORMAPS), default="cold-hot",
+                               tooltip="'cold-hot' and 'green-magenta' put zero in the "
+                                       "middle, which is what you want for a filter that "
+                                       "answers with a sign."),
+                io.Combo.Input("normalization", options=list(R.NORMALIZERS),
+                               default="signed, robust",
+                               tooltip="Zero in the middle, so the two sides of an edge read "
+                                       "as light and dark rather than both as bright.\n\n"
+                                       "'robust' scales by a high percentile rather than the "
+                                       "maximum. A well-trained filter is silent nearly "
+                                       "everywhere and enormous in a few pixels, and plain "
+                                       "'signed' divides by one of those few — which renders "
+                                       "the whole picture as flat grey."),
+                io.Int.Input("columns", default=0, min=0, max=64, advanced=True,
+                             tooltip="Sheet layout only. 0 picks a square-ish grid."),
+            ] + save_inputs("filters"),
+            outputs=[
+                io.Image.Output(display_name="images"),
+                io.String.Output(display_name="report"),
+            ],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, model, image, layer: str = "", remove_mean: bool = True,
+                layout: str = "batch", colormap: str = "cold-hot",
+                normalization: str = "signed, robust", columns: int = 0, save: bool = False,
+                filename_prefix: str = "") -> io.NodeOutput:
+        available = DR.dreamable_layers(model)
+        if not available:
+            raise NeurodesError(
+                "This model has no layer that keeps its spatial extent, so there is nothing "
+                "to slide over a picture.",
+                hint="A Filter Bank needs a convolutional layer. A Flatten or a Linear turns "
+                     "the picture into a vector and the geometry is gone.",
+            )
+        name = (layer or "").strip() or available[-1]
+        if name not in available:
+            raise NeurodesError(
+                f"There is no layer with spatial extent called {name!r}.",
+                hint="Available: " + ", ".join(available),
+            )
+
+        x = R.image_to_model_input(image, model.input_shapes[0], resize=False)
+        x = x.to(model.device)
+        if remove_mean:
+            x = x - x.mean()
+        model.eval()
+        with allocating(), torch.no_grad():
+            try:
+                out = model.forward_to(name, x)
+            except RuntimeError as exc:
+                raise NeurodesError(
+                    f"Could not run up to '{name}' at {x.shape[-2]}x{x.shape[-1]}: {exc}",
+                    hint="Layers after a Flatten are locked to the size the model was built "
+                         "for. Pick a layer before the Flatten.",
+                ) from None
+        images = R.to_images(out, layout=layout, colormap_name=colormap,
+                             normalization=normalization, upscale=1, channel=-1,
+                             columns=int(columns))
+        report = (f"{name} over {x.shape[-2]}x{x.shape[-1]}   {R.describe(out)}\n"
+                  f"{images.shape[0]} image(s) at {images.shape[2]}x{images.shape[1]}\n"
+                  f"available: {', '.join(available)}")
+        return image_result(cls, images, report, save=bool(save),
+                            filename_prefix=filename_prefix)
+
+
+VISION_NODES = [NeuroCaptureActivations, NeuroActivationImage, NeuroFilterBank,
+                NeuroDeepDream]

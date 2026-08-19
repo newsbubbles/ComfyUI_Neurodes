@@ -50,7 +50,7 @@ _SIGNED = {
 }
 
 COLORMAPS = tuple(_MAPS) + tuple(_SIGNED)
-NORMALIZERS = ("per image", "whole tensor", "signed", "none")
+NORMALIZERS = ("per image", "whole tensor", "signed", "signed, robust", "none")
 
 
 def _lut(name: str, steps: int = 256) -> torch.Tensor:
@@ -82,6 +82,12 @@ def normalize(planes: torch.Tensor, mode: str = "per image") -> torch.Tensor:
     hides how strongly they actually fired. ``whole tensor`` uses one range for all of
     them, which is the honest comparison. ``signed`` centres zero at the middle of the
     range, which is what you want for weights and gradients.
+
+    ``signed, robust`` centres zero as well but scales by a high percentile instead of the
+    maximum, and clips what is left over. That is for the case ``signed`` handles badly: a
+    sparse response map is *mostly* small with a few very large spikes, and dividing by the
+    largest of them squashes everything that is not a spike into a flat band around mid
+    grey. Which is to say it renders a well-trained filter as an empty picture.
     """
     flat = planes.reshape(planes.shape[0], -1)
     if mode == "none":
@@ -89,6 +95,12 @@ def normalize(planes: torch.Tensor, mode: str = "per image") -> torch.Tensor:
     if mode == "signed":
         span = flat.abs().max().clamp(min=1e-8)
         return (planes / span) * 0.5 + 0.5
+    if mode == "signed, robust":
+        values = flat.abs().flatten()
+        if values.numel() > 1 << 20:                 # torch.quantile has a size limit
+            values = values[torch.randperm(values.numel())[: 1 << 20]]
+        span = torch.quantile(values, 0.995).clamp(min=1e-8)
+        return ((planes / span) * 0.5 + 0.5).clamp(0, 1)
     if mode == "whole tensor":
         lo, hi = flat.min(), flat.max()
         return (planes - lo) / (hi - lo).clamp(min=1e-8)

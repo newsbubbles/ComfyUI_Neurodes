@@ -11,6 +11,7 @@ from __future__ import annotations
 import torch
 from comfy_api.latest import io, ui
 
+from ..core import discover as DS
 from ..core import plot as PL
 from ..core import train as T
 from ..core.errors import NeurodesError
@@ -343,6 +344,51 @@ class NeuroTextCard(io.ComfyNode):
                       save=save, filename_prefix=filename_prefix)
 
 
+class NeuroPlotResponses(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="NeuroPlotResponses",
+            display_name="Response Histogram",
+            category=CAT,
+            description="How often a filter fires, and how hard — drawn against the same "
+                        "filters before they were trained.\n\nThis is the picture the "
+                        "unsupervised objectives are actually optimising. A trained filter "
+                        "gives a tall spike at zero with long thin tails: silent on almost "
+                        "every patch, emphatic on a few. An untrained one gives a bell.\n\n"
+                        "Both curves are scaled to the same width first, because otherwise "
+                        "this would be a picture of gain, and gain is the thing these "
+                        "objectives are built to ignore. The vertical axis is logarithmic "
+                        "because the rare large responses are the informative ones and a "
+                        "linear axis hides them completely.",
+            search_aliases=["histogram", "distribution", "sparsity", "kurtosis", "responses",
+                            "firing"],
+            inputs=[
+                Model.Input("model"),
+                Dataset.Input("dataset"),
+                io.Int.Input("kernel", default=-1, min=-1, max=1 << 14,
+                             tooltip="-1 pools every kernel together; or pick one."),
+                io.Int.Input("width", default=720, min=320, max=1600, advanced=True),
+                io.Int.Input("height", default=440, min=240, max=1200, advanced=True),
+            ] + save_inputs("responses"),
+            outputs=[
+                io.Image.Output(display_name="image"),
+                io.String.Output(display_name="report"),
+            ],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, model, dataset, kernel: int = -1, width: int = 720, height: int = 440,
+                save: bool = False, filename_prefix: str = "") -> io.NodeOutput:
+        after, before = DS.response_pair(model, dataset, kernel=int(kernel))
+        which = "all kernels" if kernel < 0 else f"kernel {kernel}"
+        image = PL.response_histogram(after, before, int(width), int(height),
+                                      title=f"How often a filter fires — {which}")
+        report = DS.report(model, dataset)
+        return _shown(cls, image, report, save=save, filename_prefix=filename_prefix)
+
+
 VIZ_NODES = [NeuroPlotLoss, NeuroPlotAccuracy, NeuroPlotBoundary, NeuroPlotFit,
              NeuroPlotConfusion, NeuroPlotWeights, NeuroPlotDataset,
-             NeuroPlotReconstruction, NeuroTextCard]
+             NeuroPlotReconstruction, NeuroPlotResponses, NeuroTextCard]

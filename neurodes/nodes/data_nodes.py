@@ -7,6 +7,7 @@ from comfy_api.latest import io, ui
 
 from ..core import data as D
 from ..core import diffuse as DF
+from ..core import discover as DS
 from ..core import prepare as P
 from ..core import text as TX
 from ..core.errors import NeurodesError
@@ -700,8 +701,72 @@ class NeuroDatasetPairs(io.ComfyNode):
                              ui=ui.PreviewText(bundle.describe()))
 
 
+class NeuroImagePatches(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="NeuroImagePatches",
+            display_name="Image Patches",
+            category=CAT,
+            description="Thousands of little squares cut at random out of one picture, with "
+                        "no labels and nothing to predict.\n\nThis is the raw material for "
+                        "learning filters rather than being given them: feed it to Discover "
+                        "Kernels and a bank of convolutions will go looking for whatever "
+                        "structure this particular image has. Change the picture and you get "
+                        "a different set of filters, which is the interesting part.\n\n"
+                        "Wire 'input shape' straight into an Input node.",
+            search_aliases=["patches", "unsupervised", "sparse coding", "ica", "filters",
+                            "kernels", "self-supervised", "no labels", "crops"],
+            inputs=[
+                io.Image.Input("image", tooltip="Any image. One is enough — a photograph has "
+                                                "hundreds of thousands of patches in it."),
+                io.Int.Input("patch_size", default=12, min=3, max=64,
+                             tooltip="The size of each square, and so the largest kernel that "
+                                     "can be learned. 12 is big enough to hold an edge and "
+                                     "small enough to train in seconds."),
+                io.Int.Input("count", default=6000, min=64, max=200000,
+                             tooltip="How many patches to cut. More is a better estimate of "
+                                     "what this image looks like, at linear cost."),
+                io.Boolean.Input("greyscale", default=True,
+                                 tooltip="Collapse colour to brightness. On, the kernels are "
+                                         "about shape; off, they are free to be about colour "
+                                         "too, and some of them will be."),
+                io.Boolean.Input("remove_mean", default=True,
+                                 tooltip="Subtract each patch's own average brightness.\n\n"
+                                         "Not cosmetic. A patch's mean is the biggest thing "
+                                         "in it, and a filter that just measures brightness "
+                                         "scores well without having learned any structure. "
+                                         "Turning this off drops kurtosis from 19.5 to 8.4 "
+                                         "and the kernels come out visibly worse."),
+                io.Float.Input("val_fraction", default=0.15, min=0.0, max=0.5, step=0.05,
+                               advanced=True,
+                               tooltip="A strip down the right-hand edge, held out. A strip "
+                                       "rather than a random split because patches overlap, "
+                                       "and a random split would put nearly the same pixels "
+                                       "on both sides of it."),
+                io.Int.Input("seed", default=0, min=0, max=1 << 31, advanced=True,
+                             control_after_generate=True),
+            ],
+            outputs=[
+                Dataset.Output(display_name="dataset"),
+                ShapeType.Output(display_name="input shape"),
+                io.Int.Output(display_name="patches"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, image, patch_size: int = 12, count: int = 6000, greyscale: bool = True,
+                remove_mean: bool = True, val_fraction: float = 0.15,
+                seed: int = 0) -> io.NodeOutput:
+        bundle = DS.image_patches(image, patch=int(patch_size), count=int(count),
+                                  greyscale=bool(greyscale), remove_mean=bool(remove_mean),
+                                  val_fraction=float(val_fraction), seed=int(seed))
+        return io.NodeOutput(bundle, bundle.input_shape, bundle.n_train,
+                             ui=ui.PreviewText(bundle.describe()))
+
+
 DATA_NODES = [NeuroToyDataset, NeuroCurveDataset, NeuroVisionDataset,
               NeuroDatasetFromImages, NeuroImageFolderDataset, NeuroImagePairsDataset,
               NeuroDatasetAutoencoder, NeuroDatasetImageTask, NeuroDatasetDiffusion,
-              NeuroDatasetPairs, NeuroTextDataset, NeuroAugmentDataset,
-              NeuroDatasetInfo]
+              NeuroDatasetPairs, NeuroTextDataset, NeuroImagePatches,
+              NeuroAugmentDataset, NeuroDatasetInfo]

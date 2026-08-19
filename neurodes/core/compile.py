@@ -118,6 +118,29 @@ class CompiledModel(nn.Module):
     def n_parameters(self, trainable_only: bool = False) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad or not trainable_only)
 
+    def reinitialise(self, seed: int | None = None) -> None:
+        """Throw the weights away and draw new ones.
+
+        Needed because ComfyUI caches a node's output: a Build Model node whose widgets have
+        not changed is not re-executed, so the *same model object* is handed to the trainer
+        on every run. Without this, pressing run a second time silently continues from the
+        weights the first run left behind — so two runs of a workflow do not compare two
+        settings, they compare one setting against itself plus more training.
+
+        Every parameter in the pack lives inside a torch module that knows how to
+        re-initialise itself. Buffers, which is where a fixed positional encoding lives, are
+        deliberately untouched: they were never learned.
+
+        A shared layer is one module used at two call sites, and ``modules()`` yields each
+        object once, so tied weights stay tied.
+        """
+        if seed is not None:
+            torch.manual_seed(int(seed))
+        for module in self.modules():
+            reset = getattr(module, "reset_parameters", None)
+            if callable(reset) and module is not self:
+                reset()
+
     @property
     def device(self) -> torch.device:
         """Where this model's weights currently live.

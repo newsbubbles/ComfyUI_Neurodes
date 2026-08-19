@@ -309,6 +309,98 @@ Typographic characters were folded to ASCII first — em-dashes, ×, π, ⇒ —
 appeared once or twice and cost an embedding row the model could never learn anything about.
 97 distinct characters down to 87.
 
+## 4f. Learning kernels with nothing to copy
+
+The ask was a network that learns "novel" convolutional kernels, trained on the signal of
+the image histogram changing a lot, and — correctly intuited in the same sentence — probably
+needing some sort of guidance. Both halves turned out to be right, and the *way* the naive
+version fails is worth more than the working version.
+
+**The naive objective, implemented faithfully, learns nothing.** `histogram change`
+maximises the L1 distance between the soft histogram of the response and the input's. On a
+beach photograph it produces sixteen tiles of static: sparsity 0.619 where untrained kernels
+score 0.621. Two separate faults, and separating them is the whole lesson:
+
+- **Not blind to scale.** The score changes if you multiply the response by a constant, so
+  the optimiser optimises the constant. Which direction it runs is data-dependent and I
+  guessed wrong first: I wrote "it reaches for the largest number it can" into the module
+  docstring, then measured **loudness 0.039** — a response 26× *smaller* than the input. On
+  mean-centred patches the cheapest histogram maximally unlike a photograph's is a spike at
+  zero, so the bank switches itself off. Turn `diversity` on and it bolts the other way to
+  75×. Either way the volume knob is what gets trained. The fix is a scale-invariant
+  statistic: `sparse response` is E|r| over the rms, and gain cancels exactly.
+- **Silent about duplication.** Each kernel is scored alone, so all sixteen walk to the same
+  minimum. This is not fixed by a better statistic — the good objective collapses too, to
+  0.867 mean overlap. Worse, **the collapsed bank scores better**: 0.077 of sparsity gained
+  against 0.069 for the diverse one. Sixteen copies of the best answer are sixteen good
+  answers as far as the objective can see, the loss curve is genuinely lower, and nothing in
+  the curve can ever reveal it. `diversity` supplies the missing sentence.
+
+**The DC term needed isolating, not asserting.** Removing each patch's mean and forcing each
+kernel to sum to zero do the same job, and I first measured them together and concluded the
+kernel constraint did nothing. Isolated: neither on gives kurtosis 8.4, either one alone
+gives 19.5, both gives 19.4. You want exactly one. Patch centring won because it is a
+property of the dataset node and works for any architecture downstream.
+
+**The reference I nearly shipped was the wrong one.** These statistics measure
+non-Gaussianity, and photographs are extremely non-Gaussian before any filter touches them.
+Quoting the textbook Gaussian numbers (0.798, kurtosis 3) would have presented the
+*picture's* statistics as the model's achievement. Measured: the same random kernels score
+0.799 on Gaussian noise exactly as theory says, **0.62 on a beach photo and 0.52 on a
+screenshot of text** — so an untrained bank on the screenshot beats a well-trained bank on
+the beach. Every report now re-initialises the model on the user's own data to measure the
+floor, and the verdicts are phrased on the gap. This is the same trap as a size-matched null:
+the floor has to come from the data, not from theory.
+
+**Two rendering bugs, both of which made a working model look broken.**
+
+- The response histogram drew trained and untrained curves on top of each other while every
+  per-kernel statistic said they were nothing alike (kurtosis 14.2 vs 5.6). Cause: pooling
+  kernels of different variances. A mixture of differently-scaled bells is heavy-tailed
+  whatever the bells are. Standardising each kernel before pooling fixed it. A second pass
+  was still illegible because the *Gaussian reference curve's* tail — about 1e-9 at five
+  standard deviations, far below anything a finite sample shows — was setting the y-range
+  and squashing the real difference into the top tenth of the plot.
+- The filter bank rendered as flat grey. `signed` normalisation divides by the largest
+  absolute value, and a sparse response map is by construction mostly small with a few huge
+  spikes, so everything that was not a spike landed in a narrow band around mid grey. Added
+  `signed, robust`, which scales by the 99.5th percentile and clips. Dividing by the maximum
+  is exactly wrong for the thing this objective is built to produce.
+
+**`Filter Bank` exists because `Capture Activations` resizes.** The natural way to show what
+a learned kernel does is to slide it over the whole picture, and I assumed the existing
+inspect nodes covered it. They do not: they convert the image to the model's declared input
+size, so a 12×12 patch model got a 12×12 image and produced a 1×1 response. The new node
+keeps full resolution, which also demonstrates the property that makes convolutions worth
+having — the same weights run at any size.
+
+## 4g. The seed did not mean what the node said it meant
+
+Caught while building §4f's "set diversity to 0 and run again" demo, which quietly gave the
+wrong answer: overlap 0.474 instead of 0.867, because the second run had *continued
+training* the first run's kernels.
+
+ComfyUI does not re-execute a node whose inputs have not changed. `Build Model`'s widgets do
+not change when you edit the trainer, so it is never re-run, so the **same model object**
+arrives at the trainer every time — carrying whatever weights the last run left in it.
+Changing one number and pressing Run therefore compared a setting against itself plus more
+training. Confirmed on plain `Train` with only the seed varied: 1.0740 → 1.0428, then
+starting at 1.0426, then at 0.9591. And `Train`'s own description read *"Change the seed to
+train again from scratch."* The node was documenting behaviour it did not have.
+
+Fixed with `CompiledModel.reinitialise()` and a `reset_weights` flag defaulting on, appended
+to the end of both trainers' widget lists so no saved workflow shifts. Two details:
+
+- **Order matters, and got it wrong first.** Re-initialising before `model.to(device)` draws
+  the first run's weights from the CPU generator and every later run's from the CUDA one —
+  same seed, different weights, but *only on the first run*. Runs 2, 3 and 4 were
+  byte-identical to each other, which is what gave it away. The move now happens first.
+- Tied weights survive: a shared layer is one module used at two call sites and
+  `modules()` yields each object once. There is a test.
+
+`Evaluate` also had a latent `KeyError` on any unsupervised dataset — it indexed the loss
+table directly rather than going through the constructor.
+
 ## 5. Where the epoch count went
 
 Observed while watching real runs: the loss plateaus long before the epoch count runs out,
@@ -383,6 +475,24 @@ images through the conversation. Two things learned:
   LiteGraph canvas rather than drawn into it. The structural figures therefore show wires,
   widgets and shape badges but no previews; the one screenshot in the README that shows
   activations rendered on the nodes is a real screen capture.
+
+## 8b. A synthetic photograph for the tests
+
+The discovery checks need an image with natural-image statistics and no download. The
+obvious choice is noise shaped to a 1/f spectrum, and it is wrong: shaping the spectrum
+leaves the phases random, and phase alignment is what makes a picture a picture. Random-phase
+1/f noise is still Gaussian, contains no lines or boundaries, and untrained kernels score
+0.797 on it against a Gaussian's 0.798. Built on that image the tests were actively
+misleading — the naive objective passed and the working one failed, because there was
+nothing to find and finding nothing was the correct answer.
+
+Replaced with a dead-leaves model: opaque discs of power-law-distributed radius, random
+position and random shade, painted one over another. Occlusion boundaries at every scale and
+orientation. Untrained kernels now score 0.62 and a trained bank reaches 0.33.
+
+One detail the first version got wrong: discs are flat inside, so a patch cut from within
+one becomes exactly zero once its mean is removed, and two unrelated patches then compare
+byte-identical. The train/validation-leakage test accused itself. A trace of grain fixes it.
 
 ## 9. Open
 

@@ -1587,6 +1587,278 @@ def _():
 
 
 # ---------------------------------------------------------------------------
+# 6b. Learning filters with no teacher
+# ---------------------------------------------------------------------------
+print("\ndiscovery")
+
+import dataclasses  # noqa: E402
+
+from neurodes.core import discover as DS  # noqa: E402
+
+
+def _tiny_classifier(data):
+    x = make_input(data.input_shape, name="p")
+    h = apply_layer("mlp_block", [x], {"hidden": 16, "out_features": data.n_classes,
+                                       "depth": 2, "activation": "tanh"})
+    return build_model([h], name="Tiny")
+
+
+def _photo(size=192, seed=0, discs=900, grain=0.01):
+    """A test image with the property these objectives are about: edges.
+
+    The obvious synthetic stand-in for a photograph is noise shaped to a 1/f spectrum, and
+    it is the wrong one. Shaping the spectrum leaves the phases random, and it is the phase
+    alignment that makes a picture a picture — random-phase 1/f noise is still Gaussian, has
+    no lines or boundaries anywhere in it, and untrained kernels score 0.797 on it against a
+    Gaussian's 0.798. Nothing to find, so nothing is found, and a test built on it would
+    have passed the naive objective and failed the working one.
+
+    This is the dead-leaves model instead: opaque discs of random size, position and shade,
+    painted one over another. Occlusion boundaries at every scale and orientation, which is
+    what a photograph actually has and what an edge detector actually detects.
+    """
+    g = torch.Generator().manual_seed(seed)
+    canvas = torch.full((size, size), 0.5)
+    ys, xs = torch.meshgrid(torch.arange(size), torch.arange(size), indexing="ij")
+    for _ in range(discs):
+        # Radii from a power law, so there is structure at every scale rather than one.
+        radius = 2.0 + 26.0 * float(torch.rand(1, generator=g)) ** 2.4
+        cy, cx = (torch.rand(2, generator=g) * size).tolist()
+        shade = float(torch.rand(1, generator=g))
+        inside = ((ys - cy) ** 2 + (xs - cx) ** 2) <= radius * radius
+        canvas = torch.where(inside, torch.full_like(canvas, shade), canvas)
+    # A trace of grain, so that no two patches are bit-identical. Discs are flat inside,
+    # and a flat patch with its mean removed is a patch of exact zeros — which would make
+    # two unrelated patches compare equal and the leakage test below accuse itself.
+    canvas = (canvas + torch.randn(size, size, generator=g) * grain).clamp(0, 1)
+    return canvas.unsqueeze(0).unsqueeze(-1).repeat(1, 1, 1, 3)     # ComfyUI [B, H, W, C]
+
+
+def _bank(data, kernels=8, kernel=12):
+    x = make_input(data.input_shape, name="patch")
+    y = apply_layer("conv2d", [x], {"out_channels": kernels, "kernel_size": kernel,
+                                    "stride": 1, "padding": "valid", "dilation": 1,
+                                    "groups": 1, "bias": False})
+    return build_model([y], name="Bank")
+
+
+@check("patches come out of an image with no labels attached")
+def _():
+    data = DS.image_patches(_photo(), patch=12, count=800, seed=0)
+    assert data.task == "discovery"
+    assert list(data.x_train.shape[1:]) == [1, 12, 12], data.x_train.shape
+    assert data.n_val > 0 and data.y_train.abs().sum() == 0
+    assert "none" in data.describe(), data.describe()
+    # mean removed means each patch is centred on zero, not merely darker
+    assert data.x_train.mean(dim=(1, 2, 3)).abs().max() < 1e-5
+
+
+@check("validation patches come from a strip the training patches never saw")
+def _():
+    # Overlapping patches make a random split leak: the guard is that the two sets are cut
+    # from disjoint regions, so no validation patch can share a pixel with a training one.
+    image = _photo(size=160)
+    data = DS.image_patches(image, patch=12, count=400, val_fraction=0.25, seed=3)
+    train_max = data.x_train.reshape(data.n_train, -1)
+    val_max = data.x_val.reshape(data.n_val, -1)
+    same = 0
+    for row in val_max[:40]:
+        same += int((train_max - row).abs().sum(dim=1).min() < 1e-6)
+    assert same == 0, f"{same} validation patches are byte-identical to a training patch"
+
+
+@check("a patch too big for the image is reported, not crashed on")
+def _():
+    try:
+        DS.image_patches(_photo(size=64), patch=200, count=16)
+    except NeurodesError as exc:
+        assert "does not fit" in str(exc)
+    else:
+        raise AssertionError("a 200x200 patch out of a 64x64 image should not be allowed")
+
+
+@check("the sparsity score cannot be improved by turning up the gain")
+def _():
+    # The whole reason 'histogram change' fails and 'sparse response' does not.
+    r = torch.randn(4000, 6)
+    for scale in (1e-3, 1.0, 250.0):
+        assert torch.allclose(DS.sparsity(r * scale), DS.sparsity(r), atol=1e-4), scale
+        assert torch.allclose(DS.kurtosis(r * scale), DS.kurtosis(r), rtol=1e-3), scale
+    # and it lands where theory says for a gaussian
+    assert abs(DS.sparsity(r).mean().item() - DS.GAUSSIAN_L1L2) < 0.02
+    assert abs(DS.kurtosis(r).mean().item() - 3.0) < 0.25
+
+
+@check("the naive objective captures almost none of what is there to find")
+def _():
+    # Measured against the working objective on the same picture rather than against a
+    # fixed number. How much structure a filter bank *can* find depends entirely on the
+    # image — on a beach photograph the naive objective gains nothing at all, and on this
+    # one it gains a little — so the claim worth testing is the fraction it leaves behind.
+    data = DS.image_patches(_photo(seed=1), patch=12, count=2500, seed=0)
+    gains = {}
+    for objective in ("histogram change", "sparse response"):
+        model = _bank(data)
+        T.train(model, data, T.TrainConfig(epochs=60, batch_size=512, learning_rate=0.02,
+                                           loss=objective, diversity=0.0,
+                                           early_stopping=0, seed=0))
+        m = DS.measure(model, data)
+        gains[objective] = (m["floor"]["sparsity"] - m["sparsity"], m)
+    naive, working = gains["histogram change"][0], gains["sparse response"][0]
+    assert naive < 0.2 * working, \
+        f"histogram change gained {naive:.3f} of the {working:.3f} available — too much"
+    print(f"       gained {naive:.3f} where {working:.3f} was available "
+          f"({naive / working:.0%})")
+
+
+@check("the working objective beats its own untrained floor")
+def _():
+    data = DS.image_patches(_photo(seed=1), patch=12, count=2500, seed=0)
+    model = _bank(data)
+    T.train(model, data, T.TrainConfig(epochs=80, batch_size=512, learning_rate=0.02,
+                                       loss="sparse response", diversity=1.0,
+                                       early_stopping=0, seed=0))
+    m = DS.measure(model, data)
+    gained = m["floor"]["sparsity"] - m["sparsity"]
+    assert gained > 0.04, f"only improved sparsity by {gained:.3f} on the untrained floor"
+    assert m["kurtosis"] > m["floor"]["kurtosis"], (m["kurtosis"], m["floor"]["kurtosis"])
+    print(f"       sparsity {m['floor']['sparsity']:.3f} -> {m['sparsity']:.3f}, "
+          f"overlap {m['overlap']:.3f}")
+
+
+@check("without diversity the kernels collapse onto one another")
+def _():
+    # The point of the whole guidance argument: the objective alone cannot tell a bank of
+    # filters from one filter copied, and scores the copies at least as well.
+    data = DS.image_patches(_photo(seed=1), patch=12, count=2500, seed=0)
+    scores = {}
+    for diversity in (0.0, 1.0):
+        model = _bank(data, kernels=16)
+        T.train(model, data, T.TrainConfig(epochs=80, batch_size=512, learning_rate=0.02,
+                                           loss="sparse response", diversity=diversity,
+                                           early_stopping=0, seed=0))
+        scores[diversity] = DS.measure(model, data, floor=False)
+    assert scores[0.0]["overlap"] > 0.55, \
+        f"expected collapse without diversity, got overlap {scores[0.0]['overlap']:.3f}"
+    assert scores[1.0]["overlap"] < 0.35, \
+        f"diversity did not separate the kernels: overlap {scores[1.0]['overlap']:.3f}"
+    assert scores[0.0]["sparsity"] <= scores[1.0]["sparsity"], \
+        (f"the collapsed bank scored {scores[0.0]['sparsity']:.3f} against "
+         f"{scores[1.0]['sparsity']:.3f} — it is supposed to score at least as well, "
+         "which is exactly why the loss curve cannot warn anyone about this")
+    print(f"       overlap {scores[0.0]['overlap']:.3f} without, "
+          f"{scores[1.0]['overlap']:.3f} with; the collapsed bank scores "
+          f"{scores[0.0]['sparsity']:.3f} against {scores[1.0]['sparsity']:.3f}")
+
+
+@check("the untrained floor is measured on the image, not assumed")
+def _():
+    # Photographs are non-Gaussian before any filter touches them, so an absolute score is
+    # meaningless: the same random kernels must score differently on different pictures.
+    data = DS.image_patches(_photo(seed=2), patch=12, count=1500, seed=0)
+    model = _bank(data)
+    floor = DS.untrained_floor(model, data)
+    assert floor["sparsity"] < DS.GAUSSIAN_L1L2 - 0.02, \
+        f"random kernels on a 1/f image should already beat gaussian, got {floor['sparsity']:.3f}"
+    # and measuring it must leave the real weights exactly where they were
+    before = {k: v.clone() for k, v in model.state_dict().items()}
+    DS.untrained_floor(model, data)
+    for k, v in model.state_dict().items():
+        assert torch.equal(v, before[k]), f"{k} was left re-initialised"
+
+
+@check("pooled responses are standardised per kernel before being drawn")
+def _():
+    # Kernels with different variances pool into a heavy-tailed mixture whatever their
+    # individual shapes are, which made an untrained bank draw the same curve as a trained
+    # one while every per-kernel statistic said they were nothing alike.
+    data = DS.image_patches(_photo(seed=1), patch=12, count=1500, seed=0)
+    model = _bank(data)
+    T.train(model, data, T.TrainConfig(epochs=60, batch_size=512, learning_rate=0.02,
+                                       loss="sparse response", diversity=1.0,
+                                       early_stopping=0, seed=0))
+    after, before = DS.response_pair(model, data)
+    def kurt(v):
+        c = v - v.mean()
+        return (c.pow(4).mean() / c.pow(2).mean().pow(2)).item()
+    assert kurt(after) > kurt(before) * 1.4, \
+        f"pooled curves barely differ: {kurt(after):.2f} vs {kurt(before):.2f}"
+
+
+@check("a supervised dataset is refused with a sentence, not a KeyError")
+def _():
+    data = D.toy_classification("two moons", n=200)
+    try:
+        T.train(_bank(DS.image_patches(_photo(), patch=12, count=200)), data,
+                T.TrainConfig(epochs=1, loss="sparse response"))
+    except NeurodesError:
+        pass
+    # and the other way: Evaluate must build an unsupervised loss without dying
+    patches = DS.image_patches(_photo(), patch=12, count=400, seed=0)
+    loss_fn = T.make_loss(T.resolve_loss("auto", patches), patches, T.TrainConfig())
+    assert callable(loss_fn)
+    assert T.resolve_loss("auto", patches) == "sparse response"
+
+
+@check("a filter bank runs over a picture far larger than it was trained on")
+def _():
+    data = DS.image_patches(_photo(size=128), patch=12, count=600, seed=0)
+    model = _bank(data, kernels=8)
+    big = torch.rand(1, 300, 420, 3)
+    x = R.image_to_model_input(big, model.input_shapes[0], resize=False)
+    assert tuple(x.shape) == (1, 1, 300, 420), x.shape
+    with torch.no_grad():
+        out = model.forward_to(model.layer_names[-1], x)
+    assert tuple(out.shape) == (1, 8, 289, 409), out.shape
+
+
+@check("training twice from the same seed gives the same model")
+def _():
+    # ComfyUI hands the *same model object* to the trainer on every run, because a Build
+    # Model node whose widgets have not changed is never re-executed. Without a deliberate
+    # re-initialisation the second run continues from the first one's weights, so changing
+    # one setting and pressing Run compares a setting against itself plus more training.
+    data = D.toy_classification("two moons", n=400, seed=0)
+    model = _tiny_classifier(data)
+    cfg = T.TrainConfig(epochs=6, batch_size=64, learning_rate=0.05, seed=5,
+                        early_stopping=0)
+    first = T.train(model, data, cfg)
+    again = T.train(model, data, cfg)                       # same object, second run
+    assert abs(first.train_loss[0] - again.train_loss[0]) < 1e-6, \
+        (f"second run started at {again.train_loss[0]:.4f} instead of "
+         f"{first.train_loss[0]:.4f}: it continued instead of restarting")
+    assert abs(first.val_loss[-1] - again.val_loss[-1]) < 1e-6
+
+
+@check("reset_weights off carries on from where the last run stopped")
+def _():
+    data = D.toy_classification("two moons", n=400, seed=0)
+    model = _tiny_classifier(data)
+    cfg = T.TrainConfig(epochs=6, batch_size=64, learning_rate=0.05, seed=5,
+                        early_stopping=0)
+    first = T.train(model, data, cfg)
+    more = T.train(model, data, dataclasses.replace(cfg, reset_weights=False))
+    assert more.train_loss[0] < first.train_loss[0], \
+        "with reset_weights off the second run should start from the trained weights"
+
+
+@check("re-initialising keeps shared weights shared")
+def _():
+    x = make_input(Shape(["B", 4]), name="a")
+    y = make_input(Shape(["B", 4]), name="b")
+    cfg = {"units": 6, "bias": True}
+    left = apply_layer("linear", [x], cfg, share="tower")
+    right = apply_layer("linear", [y], cfg, share="tower")
+    model = build_model([apply_layer("add", [left, right], {})], name="Siamese")
+    names = [n for n, _ in model.named_parameters()]
+    assert len(names) == 2, f"the tag should give one shared layer, got {names}"
+    assert model.n_parameters() == 6 * 4 + 6, model.n_parameters()
+    model.reinitialise(seed=1)
+    assert [n for n, _ in model.named_parameters()] == names
+    assert model.n_parameters() == 6 * 4 + 6, "re-initialising untied the shared weights"
+
+
+# ---------------------------------------------------------------------------
 # 7. ComfyUI node schemas, if ComfyUI is available
 # ---------------------------------------------------------------------------
 print("\nnodes")

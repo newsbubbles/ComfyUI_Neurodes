@@ -4,7 +4,7 @@
 wires, shape inference while you edit, real training, and an ordinary PyTorch file at the
 end.
 
-110 nodes · no new dependencies · 170 automated checks
+114 nodes · no new dependencies · 184 automated checks
 
 ![a CNN being inspected in the editor](examples/screenshots/neurodes_partial_activations.webp)
 
@@ -296,6 +296,7 @@ wall-clock for the whole workflow, including loading the data and drawing the ch
 | `11-diffusion-from-nodes` | **A diffusion model, built and trained from nodes**, then sampled from pure noise. Annotated on the canvas. | 195,651 params | 8 min |
 | `12-mlp-the-oldest-idea` | A plain stack of Linear layers on flattened MNIST, and what throwing away the 2-D structure costs. Annotated. | 235,146 params, 94.1% | 7s |
 | `13-nano-gpt` | **A language model, from nodes.** Causal attention, per-position loss, and it writes. Annotated. | 629,719 params | 2 min |
+| `14-kernels-with-no-teacher` | **No labels, no target, nothing to copy** — one photograph and a statement about what a good filter does. Rediscovers oriented edge detectors. Annotated. | 2,304 params, sparsity 0.62 → 0.55 | 20s |
 
 Load one with **Workflow → Open**, or drag the `.json` onto the canvas.
 
@@ -451,6 +452,69 @@ in the example as a note telling you to try it.
 with no positional signal is permutation-invariant, so it cannot express "attend one to the
 right" and cannot find the shortcut even with the mask off. The first version of that test
 scored 31% and looked like the leak did not exist.)
+
+### And one with no teacher at all
+
+![sixteen kernels applied to one photograph](examples/images/filter-bank.png)
+
+Every other example hands the network the right answer. This one has no answer in it: no
+labels, no target picture, nothing to copy. One photograph, and a statement about what a
+good filter *does*.
+
+What comes out are oriented edge detectors at a range of angles and scales — the alphabet
+that falls out of sparse coding (Olshausen & Field, 1996), out of ICA on natural scenes
+(Bell & Sejnowski, 1997), and out of the first layer of essentially any convolutional net
+trained on photographs. Nobody wrote the word "edge" anywhere in the graph. Edges are what
+is left when you ask for a filter whose response to a photograph is *rarely* large.
+
+The whole model is one `Conv 2D`, 2,304 weights. **Image Patches** cuts six thousand 12×12
+squares out of your picture; **Discover Kernels** trains them against an objective instead
+of a target; **Filter Bank** slides every learned kernel back over the full-resolution
+image. That last part is the point of a convolution and worth saying out loud: a bank
+learned on 12×12 patches runs unchanged over a megapixel photograph, and each response
+comes out as a plain ComfyUI IMAGE that can go to an upscaler, a ControlNet or img2img like
+anything else.
+
+**The obvious objective does not work, and it is in the node so you can watch it fail.**
+
+![the same bank under three objectives](examples/images/kernels-three-ways.png)
+
+Set `objective` to `histogram change` — make the output histogram as unlike the input's as
+possible — and you get sixteen tiles of static. Untrained kernels score 0.621 on that beach
+photograph; trained ones score 0.619. Two separate things are wrong:
+
+- **It is not blind to scale.** The score moves if you multiply the response by a constant,
+  so the optimiser optimises the constant. On mean-centred patches the cheapest histogram
+  maximally unlike a photograph's is a spike at zero, so the bank *switches itself off* — a
+  response 26× smaller than the input. Turn `diversity` on and it bolts the other way, to
+  75× too large. Either way the thing being trained is the volume knob.
+- **`sparse response` is a ratio** — E|r| over the rms — so gain cancels exactly. The only
+  way left to move it is to change the *shape* of the distribution, which was the
+  interesting part all along.
+
+**And the working objective still needs guidance, for a completely different reason.** Set
+`diversity` to 0 and the report says both of these at once:
+
+```
+Sparsity improved 0.077 on the untrained floor — each kernel is quiet over
+most of the image and loud in a few places, which is what an edge detector does.
+The kernels have collapsed: on average each one is 87% the same as its neighbour.
+```
+
+The diverse run gained **0.069**. The collapsed one gained **0.077**. By the only measure
+being optimised, throwing away fifteen of your sixteen filters is an *improvement* — and of
+course it is, because each kernel is scored on its own and sixteen copies of the best answer
+are sixteen good answers. No better statistic fixes that, and no amount of staring at the
+loss curve reveals it, because the curve really is lower. The middle panel above is what it
+looks like: the same diagonal edge, sixteen times.
+
+**One number in the report is there to stop you fooling yourself.** These statistics measure
+non-Gaussianity, and photographs are strongly non-Gaussian before any filter touches them.
+The same random kernels score 0.798 on Gaussian noise exactly as theory says, 0.62 on a
+beach, and 0.52 on a screenshot of text — so an untrained bank on the screenshot posts a
+better sparsity than a well-trained one on the beach. Every report therefore re-measures the
+floor by re-initialising the model on your own data, and only the gap from it means
+anything.
 
 ---
 
@@ -691,7 +755,7 @@ are on an older copy, nudge the `seed` widget to force a reload.
 python check.py
 ```
 
-170 checks. Most need no ComfyUI at all: shape algebra; every layer's
+184 checks. Most need no ComfyUI at all: shape algebra; every layer's
 infer → build → verify → export → execute → numerically-compare round trip; the error
 messages, asserting each names its layer and carries a usable hint; graph topology; weight
 sharing; training convergence on XOR *including that a network without a hidden layer fails

@@ -456,6 +456,11 @@ def dataset_preview(data, width: int = 560, height: int = 560) -> Image.Image:
             tiles = tiles.repeat(1, 1, 1, 3)
         elif tiles.shape[-1] > 3:
             tiles = tiles[..., :3]                     # show the picture, drop the extras
+        if tiles.min() < 0:
+            # Patches with their mean removed are centred on zero, and clamping would show
+            # every darker-than-average pixel as pure black. Zero becomes mid-grey instead,
+            # scaled by one factor across the whole sheet so the tiles stay comparable.
+            tiles = tiles / (tiles.abs().max().clamp_min(1e-8) * 2) + 0.5
         th, tw = tiles.shape[1], tiles.shape[2]
         pad = 2
         sheet = torch.zeros(rows * (th + pad) + pad, cols * (tw + pad) + pad, 3)
@@ -571,6 +576,59 @@ def weight_image(tensor: torch.Tensor, width: int = 560, height: int = 560,
     canvas.paste(img, ((width - img.width) // 2, (height - img.height) // 2 + 10))
     ImageDraw.Draw(canvas).text((12, 12), caption, font=_font(12), fill=TEXT)
     return canvas
+
+
+def response_histogram(trained: torch.Tensor, untrained: torch.Tensor | None = None,
+                       width: int = 720, height: int = 440,
+                       title: str = "How often a filter fires") -> Image.Image:
+    """The distribution of filter responses, against the same filters before training.
+
+    Both sides are scaled to unit variance first. Without that the picture would be a
+    statement about gain — one curve wide and one narrow — and gain is exactly the thing
+    these objectives are built not to care about. Divided through, what is left is the
+    shape, which is the whole claim: a spike at zero with long tails means the filter is
+    silent almost everywhere and emphatic in a few places.
+
+    The vertical axis is log density, because on a linear one the tails — the rare, large,
+    informative responses — are invisible, and the tails are the point.
+    """
+    span, bins = 5.0, 45
+
+    def curve(values: torch.Tensor):
+        v = values.detach().float().flatten().cpu()
+        v = (v - v.mean()) / v.std().clamp_min(1e-8)
+        edges = torch.linspace(-span, span, bins + 1)
+        # Deliberately *not* clamping into range first. Clamping would pile every outlying
+        # response into the two end bins, which on a sparse distribution is a lot of them,
+        # and the plot would end with two tall spikes that are an artefact of the drawing
+        # rather than anything about the filter. histc drops them instead.
+        counts = torch.histc(v, bins=bins, min=-span, max=span)
+        density = counts / counts.sum().clamp_min(1) / ((2 * span) / bins)
+        return ((edges[:-1] + edges[1:]) / 2).tolist(), density.tolist()
+
+    xs, ys = curve(trained)
+    series = [(xs, ys, SERIES[0], "trained")]
+    if untrained is not None:
+        series.append((*curve(untrained), SERIES[1], "untrained"))
+    measured = list(series)
+    series.append((xs, [math.exp(-x * x / 2) / math.sqrt(2 * math.pi) for x in xs],
+                   MUTED, "gaussian"))
+
+    # The vertical range comes from the measured curves only. Including the gaussian would
+    # let its tail — around 1e-9 at five standard deviations, far below anything a finite
+    # sample can show — set the floor, and the difference the plot exists to show would be
+    # squeezed into the top tenth of the picture.
+    top = max(v for _, values, _, _ in measured for v in values)
+    floor = min((v for _, values, _, _ in measured for v in values if v > 0), default=1e-6)
+    chart = Chart(width, height, title, "response, in standard deviations",
+                  "how often (log)")
+    chart.set_limits(-span, span, math.log10(floor) - 0.1, math.log10(top) + 0.15)
+    chart.frame(y_fmt="{:.3g}")
+    for cx, cy, colour, label in series:
+        pairs = [(x, math.log10(y)) for x, y in zip(cx, cy) if y > 0]
+        chart.line([p[0] for p in pairs], [p[1] for p in pairs], colour, label,
+                   dashed=label == "gaussian")
+    return chart.finish()
 
 
 def text_card(text: str, width: int = 720, height: int = 0, title: str = "") -> Image.Image:

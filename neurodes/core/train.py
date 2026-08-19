@@ -56,6 +56,24 @@ class TrainConfig:
     device: str = "auto"
     seed: int = 0
     shuffle: bool = True
+    reset_weights: bool = True
+    """Draw new weights before training, so ``seed`` really does mean what it says.
+
+    ComfyUI does not re-execute a node whose inputs have not changed, so the model object
+    arriving here is the same one the previous run trained. Left alone, a second press of
+    Run continues from where the first stopped — which quietly ruins the most common thing
+    anyone does with a workflow, which is change one number and compare.
+
+    Turn it off to carry on training a model that is already trained.
+    """
+
+    diversity: float = 0.0
+    """How hard to push a bank of filters apart. Only used by the unsupervised objectives.
+
+    Lives here rather than on the objective so that it is stored and reported with the rest
+    of the recipe, which is what it is.
+    """
+
     early_stopping: int = 20
     """Stop after this many epochs with no improvement in validation loss. 0 disables it.
 
@@ -136,7 +154,28 @@ def resolve_device(name: str = "auto") -> torch.device:
 def resolve_loss(name: str, data: DataBundle) -> str:
     if name != "auto":
         return name
+    if data.task == "discovery":
+        return "sparse response"
     return "cross entropy" if data.task == "classification" else "mse"
+
+
+def make_loss(name: str, data: DataBundle, cfg: "TrainConfig"):
+    """The callable the loop scores with.
+
+    Unsupervised objectives are built here rather than looked up in a table because they
+    need the recipe (how hard to push the filters apart) and sometimes the data (the input's
+    own histogram) to be built at all. They take a target and ignore it, so the loop does
+    not have to know which kind it is holding.
+    """
+    if name in _LOSS_FNS:
+        return _LOSS_FNS[name]()
+    from . import discover as DS
+
+    if name not in DS.OBJECTIVES:
+        raise NeurodesError(f"Unknown loss {name!r}",
+                            hint="Choose one of: " + ", ".join(LOSSES + DS.OBJECTIVES))
+    reference = DS.reference_histogram(data) if name == "histogram change" else None
+    return DS.objective(name, diversity=float(cfg.diversity), reference=reference)
 
 
 def _shape_mismatch(declared, actual: list[int]) -> bool:
@@ -213,6 +252,32 @@ def check_compatibility(model: CompiledModel, data: DataBundle, loss_name: str) 
     out_shape = model.output_shapes[0]
     last_op = model.plan[-1].op if model.plan else None
     last_kind = last_op.kind if last_op else ""
+
+    if data.task == "discovery":
+        # Nothing to compare against, so the checks are about whether the objective can say
+        # anything at all: it scores the spread of each output channel across a batch.
+        if out_shape.rank < 2:
+            raise NeurodesError(
+                f"This model returns {out_shape}, which has no channel axis to score.",
+                hint="An unsupervised objective ranks each feature map by how it responds "
+                     "across the image, so the model needs to end on several of them — a "
+                     "Conv 2D with out_channels set to the size of the bank.",
+            )
+        width = out_shape[1]
+        if width.is_concrete and width.size < 2:
+            notes.append("With a single output channel there is nothing for the diversity "
+                         "term to push apart, so it will have no effect.")
+        if last_kind in ("relu", "sigmoid", "softmax", "log_softmax"):
+            notes.append(
+                f"There is a {last_kind.replace('_', ' ')} on the output. These objectives "
+                "score how rarely a filter fires, and a rectified response is already "
+                "one-sided before the filter has learned anything — so the score improves "
+                "without the kernels improving. Score the convolution directly.")
+        if last_op is not None and last_op.params.get("bias"):
+            notes.append("The final layer has a bias. Every objective here subtracts the "
+                         "mean response before scoring, so the bias cannot change the "
+                         "result — it is a parameter that will be trained and then ignored.")
+        return notes
 
     if data.task == "classification":
         # A language model predicts a class at every *position*, so the target has a time
@@ -389,14 +454,22 @@ def train(model: CompiledModel, data: DataBundle, cfg: TrainConfig,
 
 def _fit(model: CompiledModel, data: DataBundle, cfg: TrainConfig,
          on_progress, should_stop, history: History | None) -> History:
-    torch.manual_seed(int(cfg.seed))
     device = resolve_device(cfg.device)
+    # The move happens *before* the seeding, not after, and the order is load-bearing. A
+    # freshly built model is on the CPU and a model that has already trained once is on the
+    # GPU, and the two devices have separate random number streams — so re-initialising
+    # before the move would draw the first run's weights from one stream and every later
+    # run's from the other. Same seed, different weights, only on the first run. Moving
+    # first makes every run draw from the same stream and land in the same place.
+    model.to(device)
+    torch.manual_seed(int(cfg.seed))
+    if cfg.reset_weights:
+        model.reinitialise()
     loss_name = resolve_loss(cfg.loss, data)
     notes = check_compatibility(model, data, loss_name)
 
-    model.to(device)
     bundle = data.to(device)
-    loss_fn = _LOSS_FNS[loss_name]()
+    loss_fn = make_loss(loss_name, bundle, cfg)
     optimizer = make_optimizer(cfg.optimizer, model.parameters(), float(cfg.learning_rate),
                                float(cfg.weight_decay))
     if not list(model.parameters()):
@@ -509,19 +582,24 @@ def _add_diagnosis(history: History) -> None:
     if len(history.train_loss) < 3:
         return
     train_end, val_end = history.train_loss[-1], history.val_loss[-1]
-    val_min = min(history.val_loss)
-    if history.train_loss[-1] > history.train_loss[0] * 0.98:
-        history.notes.append(
-            "The training loss barely moved. Try a higher learning rate, more epochs, or a "
-            "bigger model — and check there is an activation between the Linear layers.")
-    elif val_end > val_min * 1.15 and train_end < history.train_loss[0] * 0.6:
-        history.notes.append(
-            "The validation loss turned back up while the training loss kept falling: the "
-            "model is memorising the training set. "
-            + ("Early stopping already handed you the weights from before that happened, so "
-               "this run is fine — but it is the sign to add Dropout, reduce the size, or get "
-               "more data." if history.restored else
-               "Add Dropout, reduce the size, or get more data."))
+    train_start, val_min = history.train_loss[0], min(history.val_loss)
+    # Both tests below are ratios against the starting loss, which only means what it is
+    # supposed to mean when the loss is positive. An unsupervised objective can be negative
+    # — "as far from the input histogram as possible" is — and then "80% of where it
+    # started" is a larger number, not a smaller one, and both tests invert.
+    if train_start > 0 and val_min > 0:
+        if train_end > train_start * 0.98:
+            history.notes.append(
+                "The training loss barely moved. Try a higher learning rate, more epochs, or "
+                "a bigger model — and check there is an activation between the Linear layers.")
+        elif val_end > val_min * 1.15 and train_end < train_start * 0.6:
+            history.notes.append(
+                "The validation loss turned back up while the training loss kept falling: the "
+                "model is memorising the training set. "
+                + ("Early stopping already handed you the weights from before that happened, "
+                   "so this run is fine — but it is the sign to add Dropout, reduce the size, "
+                   "or get more data." if history.restored else
+                   "Add Dropout, reduce the size, or get more data."))
     if history.task == "classification" and history.val_acc:
         if history.val_acc[history.kept] > 0.99:
             history.notes.append("Validation accuracy is near perfect — worth checking the task "

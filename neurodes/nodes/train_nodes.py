@@ -6,6 +6,7 @@ import torch
 from comfy_api.latest import io, ui
 
 from ..core import diffuse as DF
+from ..core import discover as DS
 from ..core import render as R
 from ..core import text as TX
 from ..core import train as T
@@ -113,6 +114,16 @@ class NeuroTrain(io.ComfyNode):
                 io.Boolean.Input("live_preview", default=True, advanced=True,
                                  tooltip="Draw the loss curve onto the node's progress bar as "
                                          "it trains."),
+                io.Boolean.Input("reset_weights", default=True, advanced=True,
+                                 tooltip="Draw new weights before training, so the seed "
+                                         "really does decide where the run starts.\n\n"
+                                         "ComfyUI does not re-run a node whose inputs have "
+                                         "not changed, so the model arriving here is the "
+                                         "same object the last run trained. With this off, "
+                                         "pressing Run twice does not compare two settings "
+                                         "— it compares one setting against itself plus "
+                                         "more training. Turn it off deliberately to carry "
+                                         "on training a model that is already trained."),
             ],
             outputs=[
                 Model.Output(display_name="trained model"),
@@ -123,14 +134,15 @@ class NeuroTrain(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, dataset, trainer, seed: int = 0,
-                live_preview: bool = True) -> io.NodeOutput:
+    def execute(cls, model, dataset, trainer, seed: int = 0, live_preview: bool = True,
+                reset_weights: bool = True) -> io.NodeOutput:
         import dataclasses
 
         import comfy.model_management as mm
         from comfy.utils import ProgressBar
 
-        cfg = dataclasses.replace(trainer, seed=int(seed))
+        cfg = dataclasses.replace(trainer, seed=int(seed),
+                                  reset_weights=bool(reset_weights))
         total_epochs = max(1, int(cfg.epochs))
         pbar = ProgressBar(total_epochs)
 
@@ -165,6 +177,138 @@ def _preview(history):
         return None
 
 
+class NeuroDiscover(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="NeuroDiscover",
+            display_name="Discover Kernels",
+            category=CAT,
+            description="Trains a bank of convolutions with nothing to copy and no labels — "
+                        "only a statement about what a good filter *does*.\n\nFeed it Image "
+                        "Patches and a model that ends on a Conv 2D. What comes out, from a "
+                        "photograph, is oriented edge detectors at a range of angles and "
+                        "sizes: the same alphabet that falls out of sparse coding, of ICA on "
+                        "natural scenes, and of the first layer of any convolutional net "
+                        "trained on pictures. Nobody said the word 'edge' anywhere.\n\n"
+                        "Two settings decide whether that happens at all, and both are worth "
+                        "breaking on purpose. Set 'objective' to 'histogram change' — the "
+                        "obvious idea — and it learns tiles of static. Set 'diversity' to 0 "
+                        "and all the kernels collapse onto the same one while the loss curve "
+                        "says everything is fine.",
+            search_aliases=["unsupervised", "sparse coding", "ica", "learn filters",
+                            "kernels", "self-supervised", "no labels", "gabor", "edge "
+                            "detectors", "discover"],
+            inputs=[
+                Model.Input("model"),
+                Dataset.Input("dataset", tooltip="From Image Patches."),
+                io.Combo.Input("objective", options=list(DS.OBJECTIVES),
+                               default="sparse response",
+                               tooltip="What counts as a good filter.\n\n'sparse response': "
+                                       "one that is quiet almost everywhere and loud in a "
+                                       "few places. This is the one that works.\n\n'peaky "
+                                       "response': the same idea measured by kurtosis — "
+                                       "sharper, and more easily swayed by a few odd "
+                                       "patches.\n\n'histogram change': make the output "
+                                       "histogram as unlike the input's as possible. The "
+                                       "obvious idea, and a failure worth running once."),
+                io.Float.Input("diversity", default=1.0, min=0.0, max=20.0, step=0.1,
+                               tooltip="How hard to push the kernels apart, by penalising "
+                                       "any two of them for responding to the same patches."
+                                       "\n\nWithout this they all find the same filter — "
+                                       "and score *better* for it, because sixteen copies of "
+                                       "the best answer is sixteen good answers as far as "
+                                       "the objective can tell. 1.0 is a good default; above "
+                                       "about 3 the kernels start to smear."),
+                io.Int.Input("epochs", default=120, min=1, max=100000,
+                             tooltip="Passes over the patches. These are tiny models, so "
+                                     "this is seconds, and more visibly sharpens the "
+                                     "filters."),
+                io.Int.Input("batch_size", default=512, min=16, max=16384,
+                             tooltip="Both objectives are statistics of a batch — a fourth "
+                                     "moment, and a correlation between every pair of "
+                                     "kernels. Small batches estimate those badly, so this "
+                                     "wants to be much larger than usual."),
+                io.Float.Input("learning_rate", default=0.02, min=1e-8, max=10.0, step=0.001),
+                io.Int.Input("seed", default=0, min=0, max=1 << 31, control_after_generate=True),
+                io.Int.Input("early_stopping", default=0, min=0, max=10000, advanced=True,
+                             tooltip="Off by default: there is no target to overfit to here, "
+                                     "and the filters keep sharpening long after the loss "
+                                     "has mostly flattened."),
+                io.Boolean.Input("live_preview", default=True, advanced=True),
+                io.Boolean.Input("reset_weights", default=True, advanced=True,
+                                 tooltip="Draw new kernels before training. Leave it on — "
+                                         "the point of this workflow is to change one "
+                                         "setting and run again, and without this the "
+                                         "second run continues from the first one's kernels "
+                                         "instead of starting over."),
+            ],
+            outputs=[
+                Model.Output(display_name="trained model"),
+                History.Output(display_name="history"),
+                io.String.Output(display_name="report"),
+            ],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, model, dataset, objective: str = "sparse response",
+                diversity: float = 1.0, epochs: int = 120, batch_size: int = 512,
+                learning_rate: float = 0.02, seed: int = 0, early_stopping: int = 0,
+                live_preview: bool = True, reset_weights: bool = True) -> io.NodeOutput:
+        import comfy.model_management as mm
+        from comfy.utils import ProgressBar
+
+        if getattr(dataset, "task", "") != "discovery":
+            raise NeurodesError(
+                f"This node needs a dataset with no targets, but {dataset.name!r} is a "
+                f"{dataset.task} dataset.",
+                hint="Use the Image Patches node. Everything else in the pack has an answer "
+                     "to copy, which is what makes this one different.",
+            )
+        cfg = T.TrainConfig(epochs=int(epochs), batch_size=int(batch_size),
+                            learning_rate=float(learning_rate), loss=str(objective),
+                            diversity=float(diversity), seed=int(seed),
+                            early_stopping=int(early_stopping))
+
+        total = max(1, int(cfg.epochs))
+        pbar = ProgressBar(total)
+        history = T.History()
+        state = {"epoch": 0}
+
+        # The diversity term estimates a correlation between every pair of kernels from one
+        # batch. With fewer rows than pairs that estimate is mostly noise, and the term ends
+        # up pushing the kernels around at random instead of apart.
+        width = model.output_shapes[0][1]
+        kernels = width.size if width.is_concrete else 0
+        rows = cfg.batch_size * (1 if model.output_shapes[0].rank == 2 else 4)
+        if diversity and kernels and rows < 4 * kernels:
+            history.notes.append(
+                f"A batch of {cfg.batch_size} is small for {kernels} kernels: the diversity "
+                "term has to estimate a correlation for every pair of them from each batch. "
+                f"Raise batch_size to at least {4 * kernels}, or use fewer kernels.")
+
+        def on_progress(step: int, total_steps: int, info: dict) -> None:
+            epoch = int(info.get("epoch", 0))
+            if epoch != state["epoch"]:
+                state["epoch"] = epoch
+                pbar.update_absolute(epoch - 1, total,
+                                     _preview(history) if live_preview else None)
+
+        def should_stop() -> bool:
+            mm.throw_exception_if_processing_interrupted()
+            return False
+
+        result = T.train(model, dataset, cfg, on_progress=on_progress,
+                         should_stop=should_stop, history=history)
+        pbar.update_absolute(total, total)
+
+        report = (f"{model.model_name}: {model.n_parameters():,} parameters, "
+                  f"{objective}, diversity {diversity}\n{result.summary()}\n\n"
+                  + DS.report(model, dataset, float(diversity)))
+        return io.NodeOutput(model, result, report, ui=ui.PreviewText(report))
+
+
 class NeuroEvaluate(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -193,7 +337,9 @@ class NeuroEvaluate(io.ComfyNode):
     @classmethod
     def execute(cls, model, dataset, split: str = "validation") -> io.NodeOutput:
         loss_name = T.resolve_loss("auto", dataset)
-        loss_fn = T._LOSS_FNS[loss_name]()
+        # Not _LOSS_FNS directly: an unsupervised objective is not in that table, and looking
+        # it up there would fail with a bare KeyError naming nothing.
+        loss_fn = T.make_loss(loss_name, dataset, T.TrainConfig())
         device = T.resolve_device("auto")
         model.to(device)
         bundle = dataset.to(device)
@@ -478,5 +624,5 @@ class NeuroGenerateText(io.ComfyNode):
         return io.NodeOutput(written, ui=ui.PreviewText(written))
 
 
-TRAIN_NODES = [NeuroTrainer, NeuroTrain, NeuroEvaluate, NeuroPredictImages,
+TRAIN_NODES = [NeuroTrainer, NeuroTrain, NeuroDiscover, NeuroEvaluate, NeuroPredictImages,
                NeuroForwardImages, NeuroSampleDiffusion, NeuroGenerateText]
