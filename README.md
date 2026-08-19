@@ -4,7 +4,7 @@
 wires, shape inference while you edit, real training, and an ordinary PyTorch file at the
 end.
 
-108 nodes · no new dependencies · 159 automated checks
+110 nodes · no new dependencies · 170 automated checks
 
 ![a CNN being inspected in the editor](examples/screenshots/neurodes_partial_activations.webp)
 
@@ -239,6 +239,7 @@ let you express an architecture rather than a stack of blocks.
 | **Dataset As Image Task** | Makes the target from the input: denoise, blur, colourise, super resolution, inpaint. **A folder of pictures becomes a supervised problem with no labelling at all.** |
 | **Dataset As Diffusion** | Mixes each picture with noise by a random amount and makes *the noise* the answer. This is the training problem behind every diffusion model, and it is still just supervised learning. |
 | **Dataset As Pairs** | Draws pairs from a labelled dataset, half matching and half not, and asks *are these the same?* — the problem a Siamese network exists for. Hands them over as two inputs. |
+| **Text Dataset** | Text, cut into windows and paired with itself shifted one character along. The training objective of every language model, and it needs no labelling. |
 | **Augment Dataset** | Flips, rotations, zoom, shift, brightness, noise. Applies to the training split only, and moves an image pair together so the target still matches. |
 | **Dataset Info** | Shapes, class count, example count. Wire its shape into Input. |
 
@@ -252,6 +253,7 @@ let you express an architecture rather than a stack of blocks.
 | **Forward (Images)** | **One forward pass.** Pictures in, whatever the model makes of them out, as an ordinary IMAGE. No gradients, nothing changes. |
 | **Predict (Images)** | The same idea for a classifier: pictures in, class names out. |
 | **Sample (Diffusion)** | Starts from pure noise and runs the denoising loop until a picture appears. What a KSampler does, with the same maths and far less engineering. |
+| **Generate (Text)** | Lets a trained language model write: ask for the next character, draw one, stick it on the end, ask again. |
 
 **Forward (Images) is the swap that turns a training graph into a tool.** Build the network,
 train it once, then take Train out and put Forward in — the same wires, pointed at any image
@@ -292,6 +294,8 @@ wall-clock for the whole workflow, including loading the data and drawing the ch
 | `09-autoencoder` | Squeeze MNIST through an 8×7×7 bottleneck and rebuild it. No labels used. | 4,649 params, MAE 0.016 | 11s |
 | `10-unet-image-to-image` | **A real U-Net**: skip connections, learned upsampling, denoising a folder of pictures. | 14,803 params, MAE 0.021 | 29s |
 | `11-diffusion-from-nodes` | **A diffusion model, built and trained from nodes**, then sampled from pure noise. Annotated on the canvas. | 195,651 params | 8 min |
+| `12-mlp-the-oldest-idea` | A plain stack of Linear layers on flattened MNIST, and what throwing away the 2-D structure costs. Annotated. | 235,146 params, 94.1% | 7s |
+| `13-nano-gpt` | **A language model, from nodes.** Causal attention, per-position loss, and it writes. Annotated. | 629,719 params | 2 min |
 
 Load one with **Workflow → Open**, or drag the `.json` onto the canvas.
 
@@ -319,6 +323,28 @@ gap_1          Subtract            [B, 16]       -       tower_1, tower_1
 Give them different tags and you get two independent towers that see the world differently,
 and the comparison stops meaning anything. That is the whole lesson, and it is one text
 field.
+
+### The oldest idea, for comparison
+
+![the MLP workflow](examples/screenshots/mlp_graph.png)
+
+A stack of Linear layers with something bent between them, read left to right: 784 pixels
+in, 256, then 128, then 10 scores. `12-mlp-the-oldest-idea` runs it on MNIST with
+`flatten` on, so each 28×28 image arrives as 784 numbers in a row and the model has no idea
+which of them were neighbours.
+
+It gets most of the way there. But example 03 does the same job on the same 6,000 digits
+with a convolution:
+
+| | parameters | accuracy |
+|---|---|---|
+| the MLP | 235,146 | 94.1% |
+| the CNN | 105,914 | 98.1% |
+
+**Less than half the weights, and four points better** — because a convolution is told the
+one thing the MLP has to discover from scratch, that nearby pixels belong together. Two
+workflows, side by side, and the argument for convolutions stops being something you take
+on trust.
 
 ### The U-Net, since it is the one with the interesting shape
 
@@ -381,6 +407,50 @@ straight into a clip of the picture appearing. Six of those thirty frames:
 Trained for 164 epochs — about eight minutes on a CPU, early stopping ending it at epoch 164
 of 250 and handing back epoch 139. If you only want the idea, set `epochs` to 60 and you have
 it in ninety seconds, blurrier.
+
+### And a language model
+
+![the nano-GPT workflow](examples/screenshots/gpt_graph.png)
+
+The same shape as GPT-2, three orders of magnitude smaller and reading letters instead of
+word pieces. 629,719 parameters, two minutes on a CPU, trained on 55,000 characters — the
+prose of this README and these notes. It learns to write, badly, about node graphs:
+
+```
+The wire carries worth the the set layer in layer, the and disagrames. Restep
+Dresumptortion. The one torch satels the model anything in one timage is are
+layer is that step shape ma while its an examples nevery time.
+
+A widget missings nodes the model anyation when model that the stage graph to
+inputs the same black Same Trainin so the written anything and constructures
+values and is that shape is widget, what laye
+```
+
+Two things are worth pointing at.
+
+**The training objective is a shift.** **Text Dataset** cuts the text into overlapping
+windows and pairs each one with itself moved a single character to the left. At every
+position, the answer is the next character. Nothing is labelled — the text is its own
+answer — and the shapes say so: `[B, 96]` in, `[B, 96, 87]` out. One score per character of
+the vocabulary, at every one of the 96 positions, and the loss is the mean over all of them.
+
+**`causal` is the whole trick, and turning it off is the best experiment in the pack.**
+Attention lets every position see every other position. When the answer at position 5 *is*
+the character at position 6, a model that can see position 6 does not predict — it copies.
+
+| | validation accuracy | validation loss | what it writes |
+|---|---|---|---|
+| `causal` on | 29% | 2.50 | text-shaped English |
+| `causal` off | **98%** | **0.07** | a wall of newline characters |
+
+One toggle, a score that looks four times better, and a model that has learned nothing at
+all. It is the clearest demonstration of leakage you can build in five minutes, and it is
+in the example as a note telling you to try it.
+
+(A detail that fell out of testing this: the leak needs **Learned Positions**. Attention
+with no positional signal is permutation-invariant, so it cannot express "attend one to the
+right" and cannot find the shortcut even with the mask off. The first version of that test
+scored 31% and looked like the leak did not exist.)
 
 ---
 
@@ -621,7 +691,7 @@ are on an older copy, nudge the `seed` widget to force a reload.
 python check.py
 ```
 
-159 checks. Most need no ComfyUI at all: shape algebra; every layer's
+170 checks. Most need no ComfyUI at all: shape algebra; every layer's
 infer → build → verify → export → execute → numerically-compare round trip; the error
 messages, asserting each names its layer and carries a usable hint; graph topology; weight
 sharing; training convergence on XOR *including that a network without a hidden layer fails

@@ -7,6 +7,7 @@ from comfy_api.latest import io, ui
 
 from ..core import diffuse as DF
 from ..core import render as R
+from ..core import text as TX
 from ..core import train as T
 from ..core.errors import NeurodesError
 from ..core.plot import loss_curve
@@ -426,5 +427,56 @@ class NeuroSampleDiffusion(io.ComfyNode):
                             filename_prefix=filename_prefix)
 
 
+class NeuroGenerateText(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="NeuroGenerateText",
+            display_name="Generate (Text)",
+            category=CAT,
+            description="Let a trained language model write.\n\nThe loop is the one behind "
+                        "every language model: ask for the distribution over the next "
+                        "character, draw one from it, stick it on the end and ask again. "
+                        "That is all autoregressive generation is.\n\nThe dataset input is "
+                        "not for data — it carries the vocabulary, which is the only way to "
+                        "turn the model's numbers back into letters.",
+            search_aliases=["gpt", "sample text", "language model", "write", "complete",
+                            "autoregressive", "llm", "nanogpt"],
+            inputs=[
+                Model.Input("model"),
+                Dataset.Input("dataset", tooltip="The Text Dataset this model trained on."),
+                io.String.Input("prompt", default="", multiline=True,
+                                tooltip="Text to start from. Empty starts from one random "
+                                        "character. Characters the model has never seen are "
+                                        "dropped, since it has no number for them."),
+                io.Int.Input("length", default=400, min=1, max=8000,
+                             tooltip="How many characters to write."),
+                io.Float.Input("temperature", default=0.8, min=0.05, max=2.0, step=0.05,
+                               tooltip="How boldly to draw. Near 0 it always takes the most "
+                                       "likely character and gets stuck repeating; above "
+                                       "about 1.2 it comes apart into noise."),
+                io.Int.Input("top_k", default=0, min=0, max=512,
+                             tooltip="Only ever draw from the k most likely characters. 0 "
+                                     "considers all of them. A small k tidies up an "
+                                     "undertrained model by hiding its worst guesses.",
+                             advanced=True),
+                io.Int.Input("seed", default=0, min=0, max=1 << 31,
+                             control_after_generate=True),
+            ],
+            outputs=[io.String.Output(display_name="text")],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, model, dataset, prompt: str = "", length: int = 400,
+                temperature: float = 0.8, top_k: int = 0, seed: int = 0) -> io.NodeOutput:
+        cfg = TX.config_of(dataset)
+        with allocating():
+            written = TX.generate(model, cfg, prompt=str(prompt), length=int(length),
+                                  temperature=float(temperature), top_k=int(top_k),
+                                  seed=int(seed))
+        return io.NodeOutput(written, ui=ui.PreviewText(written))
+
+
 TRAIN_NODES = [NeuroTrainer, NeuroTrain, NeuroEvaluate, NeuroPredictImages,
-               NeuroForwardImages, NeuroSampleDiffusion]
+               NeuroForwardImages, NeuroSampleDiffusion, NeuroGenerateText]

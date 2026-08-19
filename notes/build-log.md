@@ -262,6 +262,53 @@ Two things it unlocked immediately:
 `Forward (Images)` deliberately does *not* support multi-input models — an image batch is
 one input and cannot supply the rest — and says so rather than failing in torch.
 
+## 4d. A language model, and the test that lied
+
+Text needed three things: a dataset that pairs each window with itself shifted one
+character, a loss that scores **every position** rather than one answer per example, and
+causal masking. Only the first two were missing — `causal` was already a widget on Self
+Attention and Transformer Block, which is what made this a day's work instead of a week's.
+
+The loss change is four lines: a `[batch, time, vocabulary]` output against a
+`[batch, time]` target folds both down so torch's cross entropy sees one row per position.
+Everything else — early stopping, the charts, the compatibility checks — worked unchanged.
+The one new check is worth having: a model that pools the time axis away now gets told
+"each target is a sequence, so the model has to answer at every position" instead of a
+tensor-size error naming nothing.
+
+**The interesting part was the causal test.** With the mask off, a language model can read
+the answer one step to the right, so it copies instead of predicting: 98% validation
+accuracy, 0.07 loss, and it generates a wall of newlines. That is the single best
+demonstration in the pack — a score four times better attached to a model that has learned
+nothing.
+
+The first version of the test scored **31% with the mask off** and looked like the leak did
+not exist. The cause: I had left out **Learned Positions**. Attention with no positional
+signal is permutation-invariant, so it *cannot express* "attend one to the right" and cannot
+find the shortcut. The leak needs somewhere to read the position from.
+
+That is a genuinely useful thing to have learned by getting it wrong, and it is why the
+finished test builds the whole stack rather than the smallest thing that seemed sufficient.
+A test that passes for the wrong reason and a test that fails for the wrong reason are the
+same mistake.
+
+## 4e. The corpus is the repo
+
+`examples/sample_text.txt` is this project's own README and notes with the markdown taken
+out — 55,000 characters of English about node graphs. No download, no licence question, and
+the model learning to write about tensors and widgets is a better demonstration than the
+same model learning to write about anything else.
+
+It is small, and the model overfits it in single-digit epochs. Left as it is: the
+overfitting is visible on the loss curve, early stopping deals with it, and "55,000
+characters is a small corpus" is a fact worth meeting early. Doubling the dropout was tried
+and bought exactly nothing (validation loss 2.4962 against 2.4944) for three times the wall
+clock, which says the corpus is the ceiling rather than the regularisation.
+
+Typographic characters were folded to ASCII first — em-dashes, ×, π, ⇒ — because each
+appeared once or twice and cost an embedding row the model could never learn anything about.
+97 distinct characters down to 87.
+
 ## 5. Where the epoch count went
 
 Observed while watching real runs: the loss plateaus long before the epoch count runs out,
@@ -281,7 +328,7 @@ useful discipline: if an example needs a healthy GPU to be bearable, it is a bad
 
 ## 7. Testing approach
 
-`check.py`, 140 checks, most needing no ComfyUI.
+`check.py`, 170 checks, most needing no ComfyUI.
 
 The load-bearing one is per-layer round-tripping: trace → build → verify inferred shape
 against a real forward pass → export source → `exec` it → load the trained weights in →

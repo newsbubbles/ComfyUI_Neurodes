@@ -1,0 +1,1072 @@
+This is the prose from the neurodes README and notes, with the markdown taken out. It is here to be trained on: a language model that learns to write like its own documentation.
+
+neurodes
+
+Build, train and inspect neural networks as ComfyUI node graphs. Typed tensors on the
+wires, shape inference while you edit, real training, and an ordinary PyTorch file at the
+end.
+
+108 nodes - no new dependencies - 159 automated checks
+
+A convolutional net mid-inspection. Capture Activations runs one digit through the
+trained model; two Activation Image nodes render what the first and second convolutions
+saw, on the nodes themselves. Behind them, Train draws the loss curve as it goes.
+
+Contents
+Why this works
+Install
+Your first network - a five-minute walkthrough
+The nodes
+Example workflows
+Training on your own pictures
+What comes out
+Looking inside a trained network
+Where the pictures go
+Things worth knowing
+Troubleshooting
+Development
+
+Why this works
+
+ComfyUI is intuitive because of its type system. You cannot plug a VAE into a sampler's
+model slot, so the editor teaches you the rules of the thing you are building without ever
+explaining them.
+
+The rules of a neural network are exactly that kind of rule. A tensor of one shape goes into
+a layer, a tensor of another shape comes out, and much of what makes networks hard to learn
+is that this is invisible until it crashes.
+
+So: the wire carries a tensor, and the node is a layer. Dropping a Linear onto a wire is
+the same act as constructing a module and calling it.
+
+That is not a metaphor invented for this pack. It is the Keras Functional API, which is
+already a DAG of typed values:
+
+Read it vertically and it is a ComfyUI workflow. ComfyUI is a better editor for that
+program than Python is.
+
+What is actually on the wire
+
+A symbolic tensor: a shape, a dtype, and a back-pointer to the op that made it. Running
+the graph traces the network rather than executing it, and three things follow.
+
+Editing stays instant. Nothing is allocated until you press Build Model.
+
+Shapes are inferred while you edit. Every node shows what it produces, on the node.
+"What shape is it here?" is the question beginners ask constantly and diagrams never answer.
+
+Errors land on the node that caused them, before any data exists, with a sentence you
+can act on:
+
+Shapes carry names, not just numbers. B, T, 512 says the batch and sequence length are
+decided at run time, and a mismatch is reported by name. The batch dimension is written out
+on purpose - hiding it is where most shape confusion starts.
+
+The graph compiles to PyTorch
+
+Export gives you the file a practitioner would have written, every forward line annotated
+with its shape:
+
+Dragging boxes is a fine way to think and a dead end if the result only runs inside the tool
+that drew it. Pair the export with Save Weights and the model runs anywhere torch does.
+
+The test suite executes the exported source, loads the trained weights into it, and asserts
+both models produce the same numbers - for every layer in the library. The export cannot
+quietly stop being the model that ran.
+
+Install
+
+Restart ComfyUI. There is nothing to pip install. torch, numpy and Pillow are already
+ComfyUI requirements; charts are drawn with Pillow rather than matplotlib so the pack cannot
+fail to load over a plotting library. torchvision is needed only by the MNIST/CIFAR node,
+which says so plainly if it is missing.
+
+Requires ComfyUI with the V3 node API (0.3.40+; developed against 0.17.0).
+
+Your first network
+
+Five minutes, no download, and it ends with a picture of what the network learned. Every
+node below is found by double-clicking the canvas and typing its name.
+
+1. Get some data. Add Toy Dataset and set pattern to xor. It makes a thousand
+points in two dimensions, labelled by which diagonal quadrant they fall in.
+
+2. Declare the input. Add Input and connect the dataset's input shape output to
+its shape slot. The two can now never disagree about what the data looks like. The node
+shows [B, 2]: a batch of 2-element points, batch size decided at run time.
+
+3. Add a layer. Add Linear, set units to 16, connect the Input's tensor to it. It
+shows [B, 16] and 48 params.
+
+4. Bend the line. Add Tanh after it. This is the step everything depends on. Two
+Linear layers with nothing between them collapse into a single Linear layer, and no straight
+line separates XOR.
+
+5. Produce an answer. Add another Linear with units set to 2 - one score per class.
+
+6. Close the network. Add Build Model and connect the last tensor to its output
+slot. Everything upstream becomes one model with real weights. Its summary output is the
+layer table.
+
+7. Say how to train. Add Trainer. Set epochs to 60 and learningrate to 0.03.
+It has no inputs - it is just the recipe, kept separate so one recipe can drive several
+models and the comparison stays fair.
+
+8. Train. Add Train and connect model, dataset and trainer. Run the workflow.
+
+9. Look at it. Add Decision Boundary, connect the trained model and the dataset.
+This asks the network about every point on the plane and colours it by what it would
+predict, fading where it is unsure. Add Plot Loss on the history output too.
+
+Finished, the whole thing is eleven nodes and 82 parameters:
+
+Now do the experiment. Delete the Tanh node, reconnect, and run again. Accuracy collapses
+to about 50% and the boundary becomes a flat wash. That is the most useful fact about depth
+in neural networks, and here it takes fifteen seconds to see rather than a chapter to read.
+
+This is examples/01-xor-why-activations-matter.json if you would rather load it.
+
+The nodes
+
+Everything lives under neurodes/ in the Add Node menu. Node search knows synonyms, so
+typing dense finds Linear and deepdream finds Deep Dream.
+
+neurodes/shape - describing sizes
+
+Also in this category: Flatten, Reshape, Permute, Transpose, Squeeze,
+Unsqueeze, Concat, Stack, Slice, Reduce - the plumbing that gets a tensor
+into the form the next layer wants.
+
+neurodes/model - start and finish
+
+Input (where data enters) - Build Model (closes the graph, allocates the weights) -
+Model Summary - Export PyTorch Code - Save Weights - Load Weights
+
+neurodes/layers - 65 layers
+
+Plus Layer, one node that can be any single-input layer, chosen from a dropdown. Use it
+while exploring, when you want to try five things in the same slot without rewiring.
+
+neurodes/ops - the operator level
+
+Add - Subtract - Multiply - Divide - Scale - Offset - Clamp -
+Matrix Multiply - Einsum - Cast
+
+Add is the residual connection. Multiply is a gate. Einsum is every contraction there is
+(bij,bjk->bik is a batched matmul; bhqd,bhkd->bhqk is attention scores). These are what
+let you express an architecture rather than a stack of blocks.
+
+neurodes/data - something to train on
+
+neurodes/train - fit it, then use it
+
+Forward (Images) is the swap that turns a training graph into a tool. Build the network,
+train it once, then take Train out and put Forward in - the same wires, pointed at any image
+in your workflow. That is the whole difference between fitting a model and using one, and
+here it is one node.
+
+neurodes/view - charts
+
+Plot Loss - Plot Accuracy - Decision Boundary - Plot Fit -
+Confusion Matrix - Reconstructions - View Weights - View Dataset -
+Text Card
+
+Each draws itself on its own node and outputs an IMAGE.
+
+neurodes/inspect - looking inside
+
+Capture Activations - Activation Image - Deep Dream - 
+described below.
+
+Example workflows
+
+Everything in examples/ was built and run in the editor, not written by hand, so they
+all load and all work. Every number below is from the run of that file, on a CPU; times are
+wall-clock for the whole workflow, including loading the data and drawing the charts.
+
+Load one with Workflow → Open, or drag the .json onto the canvas.
+
+Two inputs, one set of weights
+
+Most models take one thing. Some take two: a pair to compare, a picture plus the timestep
+that says how noisy it is, an image plus a mask. Dataset As Pairs makes the first kind - 
+half the pairs share a class and half do not, so 50% is chance and the number means
+something - and hands them over as two inputs, so the graph has two Input nodes.
+
+The part worth looking at is that both towers are one set of weights, used twice. Forking
+a wire duplicates data, not weights, so the two MLP Blocks carry the same share tag. Each
+node reports 624 params; the whole model is 658. The summary says so out loud:
+
+Give them different tags and you get two independent towers that see the world differently,
+and the comparison stops meaning anything. That is the whole lesson, and it is one text
+field.
+
+The U-Net, since it is the one with the interesting shape
+
+Down, across, up - laid out on the canvas the way it is drawn on paper. Each level is a
+resolution, and the two skip connections are the long horizontal wires that leave the
+encoder, pass over the whole bottom of the network and arrive at the matching decoder stage.
+
+The bottom of the U, close up, is where the one arithmetic mistake everybody makes lives:
+
+[B, 32, 24, 24] coming up from the bottleneck, [B, 16, 24, 24] arriving on the skip, and
+the Concat announcing [B, 48, 24, 24] - worked out and shown on the node while you draw it,
+so the next Conv Block cannot be given the wrong number of input channels.
+
+The three data nodes along the top turn a folder of ordinary pictures into a supervised
+problem: Image Folder Dataset → Dataset As Image Task (denoise) →
+Augment Dataset. No labelling, no paired "before" images, no preprocessing script.
+
+Once it has trained, swap Train for Forward (Images) and the same graph stops being
+an experiment and becomes a denoiser you can point at anything in your workflow.
+
+And then the diffusion model
+
+11-diffusion-from-nodes is the same U-Net, given a different job, and it turns into the
+thing a KSampler runs. It is annotated on the canvas - grouped by stage, with a note beside
+each one explaining what is happening - so it can be read without this file open beside it.
+
+The five stages, as coloured groups. The notes sit above and below the frame here; on
+the canvas they are next to the stage they describe.
+
+Stripped of engineering, a diffusion model is three sentences:
+
+1. Mix a picture with noise, by a random amount t between nothing and everything.
+2. Train a network to look at the mess and say which part was the noise.
+3. Sample by starting from pure noise, asking the network what the noise is, taking a
+ little of it away, and going round again.
+
+Step 2 is a plain supervised problem - which is why the same Train node that fits a
+classifier fits this, with mse and no special anything. All the interesting part is step 3,
+and step 3 is a for loop.
+
+Where the timestep goes is the one thing worth pointing at. The network cannot do its
+job without knowing how noisy its input is - the same grey smudge means one thing at
+t=0.1 and another at t=0.9 - so the timestep travels with the picture as two extra
+channels holding a sine/cosine encoding of t. The Input node says [B, 5, 32, 32]: three
+channels of picture, two of clock. Real implementations inject it inside every block; here
+it arrives on the wire, where you can see it. Set timechannels to 0 and the model, no
+longer able to tell how far along it is, produces mud.
+
+The second output of Sample (Diffusion) is one frame per step, so a video node turns it
+straight into a clip of the picture appearing. Six of those thirty frames:
+
+Trained for 164 epochs - about eight minutes on a CPU, early stopping ending it at epoch 164
+of 250 and handing back epoch 139. If you only want the idea, set epochs to 60 and you have
+it in ninety seconds, blurrier.
+
+Training on your own pictures
+
+08-classifier-from-a-folder runs out of the box against the 480 bundled images above
+(examples/sampleimages, 125 KB, generated with jitter in position, size, rotation, colour
+and background so the task is real rather than trivial). To use your own, point
+Image Folder Dataset at a folder laid out like this:
+
+One subfolder per class, named after the class. That is the same layout torchvision's
+ImageFolder expects, so datasets downloaded from anywhere usually work unchanged. A relative
+path is looked for in ComfyUI's input/ folder and in this pack's examples/ folder.
+
+The node signs the folder's contents, so adding images invalidates the cache and the
+next run picks them up. Without that, dropping in more training data would quietly do
+nothing.
+
+Getting a target without labelling anything
+
+Classification needs a label per image, which means somebody has to sit and sort them.
+Image-to-image does not - the answer can be derived from the picture itself.
+
+Dataset As Image Task takes any image dataset and makes the target from the input:
+
+The clean original is the answer, so a folder of holiday photos is already a training set.
+
+Augment Dataset multiplies what you have: copies says how many augmented versions of
+each example to make, and flips, rotation, zoom, shift, brightness and noise say how far to
+move them. It touches the training split only - augmenting validation data would quietly
+make the score meaningless - and when the dataset is an image pair, both images move
+together, so the target still lines up with the input.
+
+If you have genuine before-and-after pairs, Image Pairs From Folders takes two folders
+and matches them on filename stem, so before/0042.png pairs with after/0042.jpg.
+
+What comes out
+
+From 07-inside-a-trained-network: a 105,914-parameter CNN trained on MNIST to 98.1% in
+under seven seconds on a CPU.
+
+From 10-unet-image-to-image, 09-autoencoder and 08-classifier-from-a-folder:
+
+And from 11-diffusion-from-nodes, a 195,651-parameter model that has never been shown
+anything but 480 pictures of coloured shapes:
+
+Looking inside a trained network
+
+View Weights shows what a layer is. The inspect nodes show what it does to a specific
+input, and what it would most like to see.
+
+Capture Activations runs one input through and keeps every intermediate tensor. In
+ordinary PyTorch that needs a forward hook on every module; here the forward pass already
+holds each intermediate in order to feed the next one, so it comes free. Capture once, render
+as many layers as you like from the same pass.
+
+Activation Image renders one layer with no axes and no labels - the tensor and nothing
+else. The important option is layout. A conv activation is [1, 64, 28, 28]; as a
+sheet it is one contact sheet you look at, but as a batch it is 64 IMAGEs, and every
+node in ComfyUI already knows what to do with a batch. So that one output is also a Video
+Combine away from a clip, an upscale away from 64 ControlNet hints, or an img2img away from
+something stranger. Eight colormaps, three normalization modes (per image makes faint
+channels legible, whole tensor keeps them honest), nearest-neighbour upscaling so a 7x7 map
+is not blurred into looking like more than it is.
+
+Deep Dream runs the whole thing backwards. Training changes the weights to suit the data;
+this holds the weights still and changes the picture, pushing it uphill until the chosen
+layer is as excited as it can be. The output is not a diagram of what the network learned, it
+is generated from the learned weights themselves. Leave the image input empty to start from
+noise (feature visualisation: the pure form of what that layer responds to), or connect one
+for classic deep dream.
+
+Two settings do most of the work, and both are exposed so you can watch them fail:
+featuresize blurs the gradient before applying it. Without it the optimiser
+ discovers that the cheapest way to excite an edge detector is a one-pixel grating, and the
+ result is uniform corduroy that tells you nothing. Set it to 0 and see.
+strength is really a contrast dial. The node reports what fraction of the output
+ ended up pure black or white; past about 0.02 that goes over 70%.
+
+It runs at resolutions the model never saw - a convolutional prefix does not care about size,
+and only the part of the graph the target layer depends on is executed, so it never reaches
+the Flatten that would pin it down.
+
+The same layer at four strengths (left to right) and three canvas sizes (top to bottom),
+with the fraction of pixels driven to pure black or white printed on each. Two things fall
+out of it. Strength is a contrast dial, and it saturates fast. And a bigger canvas does not
+give bigger features - their size is set by the layer's receptive field, so a larger canvas
+simply fits more of them in.
+
+Where the pictures go
+
+By default the image nodes preview - the picture appears on the node, and the file lives
+in temp/, which ComfyUI clears. Since in this pack the pictures are usually the thing you
+were after, every image node also has a save toggle. Turn it on and the PNG is written
+to:
+
+filenameprefix is an advanced widget defaulting to something sensible per node
+(neurodes/loss, neurodes/dream, ...). A / in it makes a subfolder, as everywhere else in
+ComfyUI.
+
+Saved PNGs carry the workflow in their metadata, so one can be dragged back onto the canvas
+to rebuild the graph that produced it. Export PyTorch Code and Save Weights write to the
+same folder.
+
+Things worth knowing
+
+Train checks before it trains. The wrong number of outputs for the number of classes, a
+softmax in front of a loss that applies its own, a regression loss on whole-number labels, an
+autoencoder whose output shape does not match its target, an Input shape that disagrees with
+the data - each is caught and explained before the first step, instead of training a broken
+model for ten minutes. It also reads the finished curve and tells you whether it is looking
+at overfitting or at a network that never learned anything.
+
+epochs is a ceiling, not a prescription. Loss plateaus long before the epoch count runs
+out, and the extra epochs are not merely wasted - they overfit, so the model you finish with
+is worse than one you already passed through. earlystopping on the Trainer says how many
+epochs to tolerate with no improvement in validation loss, and the best weights are put
+back when it gives up. Of the eight examples above that train, three stop early and four
+more run to the ceiling but hand back earlier weights; the U-Net stops at epoch 46 of 60 and
+gives you epoch 38. Set epochs generously and let the run decide. 0 turns it off.
+
+Because the weights are restored, the run summary reports the epoch you are holding rather
+than the last one that happened - otherwise the numbers would describe a model that was
+thrown away.
+
+Weight sharing is a text field. Forking a wire duplicates data, not weights. Give two
+layers the same share tag and they use one parameter set. That is a Siamese network.
+
+A model can take more than one input. Add a second Input node and give the dataset a
+second thing to put in it - a pair to compare, or a timestep. Train feeds them in the order
+the Input nodes were traced, and says so by name if the counts do not match.
+
+Change the seed on Train to train again. ComfyUI caches node outputs, so re-running with
+identical inputs correctly does nothing. The seed widget is the ComfyUI-native way to say
+"again, differently".
+
+Depth is a knob. Nobody wants to wire twelve transformer layers, so the composite blocks
+take a repeat count. The primitives are all there if you want to build the block by hand,
+and the exported source shows what the block contains either way.
+
+Linear applies to the last dimension at any rank. Feeding it [B, 3, 12, 12] gives
+[B, 3, 12, 4], not an error - that is how every transformer uses it. If you wanted a
+classifier, the badge showing the wrong shape is what tells you to Flatten first.
+
+Troubleshooting
+
+The nodes do not appear after installing. ComfyUI swallows custom-node import errors into
+a log warning. Check the console for neurodes. The pack needs a ComfyUI new enough to have
+comfyapi.latest.
+
+Training says "element 0 of tensors does not require grad". You are on an old version of
+this pack. Update and restart ComfyUI.
+
+A workflow I saved earlier loads with the wrong numbers in it. ComfyUI stores widget
+values by position, so if an update adds a widget to a node, every value after it in a
+workflow saved beforehand shifts along by one. Nothing errors; the values are just wrong.
+Check the node against its defaults and set them again. (check.py catches this for the
+bundled examples.)
+
+A shape error I do not understand. The message names the layer, the shape it got, the
+shape it wanted, and a suggested fix. If the hint is wrong or unhelpful, that is a bug worth
+reporting - the error messages are treated as a feature here and are tested as one.
+
+Adding images to my folder changes nothing. Fixed as of the fingerprinting change; if you
+are on an older copy, nudge the seed widget to force a reload.
+
+Deep Dream output is uniform corduroy. featuresize is at 0. Put it back to ~0.9.
+
+Deep Dream output is pure black and white. strength is too high; try 0.006.
+
+Development
+
+159 checks. Most need no ComfyUI at all: shape algebra; every layer's
+infer → build → verify → export → execute → numerically-compare round trip; the error
+messages, asserting each names its layer and carries a usable hint; graph topology; weight
+sharing; training convergence on XOR including that a network without a hidden layer fails
+it; early stopping keeping the best weights and reporting them honestly; every chart;
+activation capture (including that a shared layer's two call sites are captured separately);
+the renderer at every tensor rank; and that deep dream raises the activation it targets while
+leaving the weights untouched.
+
+Set COMFYUIPATH to also validate the node schemas, that every image node can save, and
+that the example workflows reference only nodes that exist and still line up with those
+nodes' widgets.
+
+Layout
+
+Every layer is declared once, in neurodes/core/registry.py, with its shape inference,
+its nn.Module, its source-emitting form and its widget list. The discrete nodes, the Layer
+dropdown, the exporter and the summary table are all generated from that one table, so the
+shape a node shows you and the module that gets built cannot drift apart.
+
+Adding a layer is one registry entry and no node code.
+
+notes/ is the working record: design.md for why the architecture is what it is,
+research.md for what the ComfyUI V3 API actually does (read out of the source), and
+build-log.md for the bugs and the reasons behind decisions that would otherwise be lost.
+
+Licence
+
+MIT.
+
+Design - resolving torch against a node graph
+
+The brief: build a ComfyUI nodepack where nodes are neural-network layers, exploiting the
+fact that ComfyUI's slot typing already teaches people what may connect to what. Start from
+how torch does it, then from how someone who doesn't code would think about it, and find the
+interface in between that gives up neither nuance nor intuition.
+
+1. How torch does it
+
+Two distinct things, which torch deliberately blurs:
+
+A Module is a thing with weights. Calling it is an event. nn.Sequential is sugar for
+"call these in order". The actual computation graph only exists transiently, inside autograd,
+during a forward pass. Shape errors are runtime errors, discovered on the first batch.
+
+Three properties of torch that a visual editor has to reckon with:
+
+1. A module is reusable. Calling the same module twice shares weights. This is how
+ Siamese networks and tied embeddings work.
+2. Shapes are implicit. nn.Linear(64, 128) names its input width; nn.Conv2d names its
+ channel count but not H/W; nn.Flatten names nothing at all. You cannot tell what a
+ Sequential accepts without running it.
+3. The forward pass is arbitrary Python. Residual adds, concatenation, multiple inputs,
+ branching. Sequential covers maybe 60% of real architectures and 0% of interesting ones.
+
+2. How a non-coder thinks about it
+
+Ask someone who has seen a diagram of a neural network but never written one:
+A network is boxes with arrows between them. Data goes in the left, comes out the right.
+A layer is a box you drop in, and it has knobs ("how many neurons?").
+The thing on the wire is the data, at that point in the network.
+"What shape is it here?" is the question they ask constantly, and diagrams never answer.
+They do not distinguish "the layer" from "the layer's output". They point at a box and say
+ "this is 128 wide" - meaning the activation, and the weight matrix, at once.
+Training is a button, not a loop. Its result is a curve that goes down and a picture
+ of whether the thing works.
+
+Note what they get right: they think of the data flowing, not of objects being constructed.
+That intuition is worth more than it looks.
+
+3. The interface in between
+
+The wire carries a tensor. The node is a layer. Dropping a layer on a wire is the same act
+as constructing a module and calling it.
+
+That is not a compromise invented for this project - it is the Keras Functional API, and it is
+the only mainstream NN interface that is already a DAG of typed values:
+
+Read that vertically and it is a ComfyUI workflow. Every line is a node, every h is a wire.
+Which means the answer to "what does the interface in between look like" is: it already
+exists, and ComfyUI is a better editor for it than Python is.
+
+So the mapping is:
+
+What the wire actually carries
+
+Not a real tensor - a symbolic one: a shape, a dtype, and a handle to the op that produced
+it. Executing the ComfyUI graph traces the network rather than running it.
+
+This is forced on us by the runtime (V3 execute is a cached, stateless classmethod, so real
+nn.Modules built per-node would have chaotic parameter lifetimes), but it is also just
+better:
+The graph executes in milliseconds, so the editor stays interactive.
+Shape inference runs at design time. Every node knows and can display its output shape
+ before any data exists. That is exactly the question beginners keep asking and diagrams
+ never answer.
+Errors land on the node that caused them, at edit time, with a message that can say
+ Linear expects the last dim to be 64, but got 128 - did you mean to Flatten first?
+A trace is data, so it can be compiled to readable PyTorch source. The workflow is not a
+ toy that mimics a network; it is a program that prints its own torch implementation.
+
+That last point is the teaching payoff. The user drags boxes; the pack hands back the file a
+practitioner would have written. Nothing is hidden, so nothing is lost when they graduate.
+
+Where the nuance is kept
+
+The intuitive reading ("box = layer") loses three things from torch. Each is bought back
+explicitly rather than papered over:
+
+Weight sharing. Forking a wire duplicates data, not weights - the naive reading gets
+this wrong. Every layer node has a share string widget: same non-empty tag + identical
+config => one parameter set, used twice. Visible on the canvas, one concept to learn, and it
+covers Siamese nets and tied embeddings.
+
+Symbolic dimensions. Batch size and sequence length are unknown while designing. Shapes
+are therefore lists of int | name: B, 3, 224, 224 or B, T, 512. Named dims unify
+wherever they meet and mismatches are reported by name, which is how people already reason
+about shapes on a whiteboard.
+
+Repeated blocks. A 12-layer transformer is not 12 nodes anyone wants to wire. Composite
+nodes (Transformer Block, Residual Block, MLP Block) take a repeat count, so depth is
+a knob. The primitives stay available for anyone who wants to build the block by hand - and
+the emitted source shows the loop.
+
+More than one input. A model can have several Input nodes, and a dataset can supply
+several things - a pair to compare, a picture plus the timestep saying how noisy it is.
+DataBundle keeps xtrain as the first input and carries the rest in sidetrain, so
+every single-input path is unchanged and the multi-input one is model(inputs). They are
+fed in the order the Input nodes were traced, and a count mismatch is reported by name
+before training starts.
+
+Training and inference are the same graph
+
+A graph that fits a model and a graph that uses one differ by a single node. Everything
+upstream of Build Model is the architecture; what comes after decides what happens to it:
+
+That is the design paying off. Because the model is a value on a wire rather than a mode the
+graph is in, "train it" and "use it" are two nodes with the same input socket, and swapping
+one for the other is a normal ComfyUI edit. It also means there is nowhere for a training-only
+assumption to hide: Forward (Images) and Train are given the same object.
+
+4. Why not the alternatives
+
+Eager execution (each node builds a real module and runs a real batch). Rejected: node
+output caching makes parameter identity unpredictable across runs, every edit costs a forward
+pass, and there is no separation between "the architecture" and "a run of it".
+
+nn.Sequential only (a chain node with a list of layers). Rejected: it throws away the
+one thing ComfyUI is good at. Residual connections, two-input losses and multi-head outputs
+are the interesting part of architecture, and a chain cannot express them.
+
+Config-object nodes (each node emits a dict, one big builder assembles them). Rejected:
+the wire stops meaning anything. TENSOR in / TENSOR out is what makes the type system
+teach; LAYERCONFIG in / LAYERCONFIG out teaches nothing and would connect anything to
+anything.
+
+5. Consequences that shape the code
+One registry, four consumers. Each layer is declared once, with infer (shape math),
+ build (nn.Module), emit (source line) and params (widget list). From that single
+ table we generate the discrete nodes, the mega Layer node, the code exporter and the
+ summary table. ~50 layers, no per-node boilerplate, and no way for the shape math to
+ disagree with the module that gets built.
+Core is pure Python. neurodes/core/ imports nothing from ComfyUI, so the whole thing
+ is testable headless with python check.py. neurodes/nodes/ is a thin adapter.
+Shape errors are the product. Every infer raises ShapeError with the layer name, the
+ shape it got, the shape it wanted, and a suggested fix. This is the single highest-leverage
+ surface in the pack and gets tested like it.
+Two entry points for shape. A text widget (B, 3, 224, 224) is primary - arbitrary rank,
+ supports named dims, one widget. Shape From Dims uses Autogrow INT sockets for shapes
+ computed upstream, since Autogrow forces widgets to sockets anyway (research.md section 3).
+Zero new dependencies. torch + numpy + PIL only, all of which ComfyUI already requires.
+
+Build log
+
+A running record of decisions, bugs and things that turned out not to be true. Kept because
+the reasons are the part that gets lost, and because several of these cost real time and
+would cost it again.
+
+Companion documents: design.md (why the architecture is what it is) and research.md
+(what the ComfyUI V3 API actually does, read out of the source).
+
+1. The founding decision
+
+A ComfyUI graph is the Keras Functional API. h = Dense(128)(x) read vertically is a node
+with a tensor in and a tensor out, so the mapping needs no invention.
+
+The consequence that everything else follows from: the wire carries a symbolic tensor
+(shape + dtype + back-pointer to its producer), and running the graph traces the network
+rather than executing it. Forced by the runtime - a V3 execute is a cached, stateless
+classmethod, so real nn.Modules built per node would have chaotic parameter lifetimes - 
+but better anyway: editing stays instant, shapes are known at design time, and errors land
+on the node that caused them.
+
+Alternatives considered and rejected are written up in design.md section 4.
+
+2. One registry, four consumers
+
+Each layer is declared once in core/registry.py with infer / build / emitinit /
+emitcall / params. From that single table we generate the discrete nodes, the Layer
+dropdown, the code exporter and the summary table.
+
+This is the load-bearing structural choice. It means the shape a node shows you and the
+module that gets built cannot disagree, because they are the same declaration. Adding a
+layer is one entry and no node code.
+
+3. Bugs worth remembering
+
+3.1 ComfyUI runs prompts inside torch.inferencemode()
+
+Symptom: RuntimeError: element 0 of tensors does not require grad and does not have a
+gradfn, at the first loss.backward(). Only inside ComfyUI; headless tests passed.
+
+Cause: inference mode is stronger than nograd. A tensor created while it is active
+is permanently barred from autograd. So torch.enablegrad() alone does nothing - the
+weights were already poisoned in an earlier node.
+
+Fix: core/runtime.py. Three separate places have to escape it: building the model,
+building the dataset, and training. Tensors handed in by the host (a ComfyUI IMAGE used as
+training data) must be cloned out with adopt().
+
+ComfyUI's own comfyextras/nodestrain.py does the same thing, which confirmed it was the
+intended escape hatch rather than a hack.
+
+3.2 Cached node outputs are shared mutable objects
+
+Symptom: run 1 fine, run 2 fails in Train with the same grad error as 3.1 - which
+sent the diagnosis down the wrong path at first.
+
+Cause: dream() did parameter.requiresgrad(False). ComfyUI caches Build Model, so
+the next run's Train got the same object with its gradients switched off.
+
+Fix: delete the line. torch.autograd.grad(loss, x) returns only the gradient with
+respect to x and never accumulates into parameters, so it bought nothing.
+
+General rule: treat anything arriving on an input socket as read-only. The symptom
+appears in a different node than the cause, so suspect this whenever the first run works
+and the second does not. Regression test must run the mutating node and then re-run the
+upstream one - a single pass will never catch it.
+
+3.3 The folder loader never noticed new images
+
+Symptom: added images to the training folder, dataset size unchanged.
+
+Cause: ComfyUI caches on input values, and widget values do not change when the folder
+contents do.
+
+Fix: fingerprintinputs signing the folder's file list and modification times.
+
+Found only because a test run reported an identical parameter count to the previous one.
+Worth watching for: identical numbers across runs are suspicious.
+
+3.4 Device placement
+
+Symptom: Expected all tensors to be on the same device in Deep Dream, and later in
+evaluate.
+
+Cause: training moves the model to the GPU; anything handed to it afterwards has to
+follow. CPU-only tests cannot catch this.
+
+Fix: CompiledModel.device, used by the capture, dream and evaluate paths. The test for
+it is gated on torch.cuda.isavailable() and says so out loud when it skips, rather than
+passing quietly on a machine that cannot exercise it.
+
+3.5 A new widget silently rewrote every saved workflow
+
+Symptom: after adding earlystopping to the Trainer, the bundled examples loaded with
+learningrate of NaN, batchsize of 0 and shuffle set to auto. No error anywhere.
+
+Cause: a workflow stores widget values as a positional array. earlystopping went in
+at index 1, so every value after it in the seven workflows saved beforehand shifted along by
+one. The frontend fills in missing trailing values from the defaults, which is why adding a
+widget at the end is harmless and adding one in the middle is not.
+
+Fix: patch the seven files, and add a check that type-checks each saved value against the
+schema slot it lands in - INT/FLOAT/BOOLEAN by type, COMBO by membership. A shift almost
+always lands a float on an int or a string on a boolean, so this catches it. Trailing
+omissions still pass, because those are legitimate.
+
+Two false alarms the check had to be taught about, both real behaviour rather than drift:
+a seed widget is followed by a hidden controlaftergenerate value. It appears
+ whenever the id is seed, whether or not the schema declares the flag - four data nodes
+ were relying on that, and now say so explicitly.
+a MultiType input reports "STRING,NEUROSHAPE"; the widget is the first entry. That is
+ how Input.shape keeps a typed value while also accepting a connection.
+
+General rule: adding a widget anywhere but the end is a breaking change to every saved
+workflow. If it has to go in the middle, expect to migrate the files.
+
+3.6 The summary described a model that had been thrown away
+
+Not a crash - a false report. With early stopping restoring the best weights, the run summary
+still printed val acc 92.4% -> 97.6% from the last epoch, while the weights in hand were
+epoch 11's. History.kept now indexes the epoch the model actually holds, and every -> in
+the summary reads from it.
+
+Worth stating as a rule: any figure printed after a restore has to be re-derived, not carried
+over. The overfitting diagnosis is the exception - it is looking at the shape of the whole
+curve on purpose, and now says out loud that early stopping already dealt with it.
+
+3.7 The sampler got worse the harder it worked
+
+Symptom: the tiny diffusion model produced recognisable shapes at 20 sampling steps and
+pure static at 60. More effort, worse result.
+
+Cause: each DDIM step splits the picture it holds into a clean guess and a noise term,
+and re-mixes them at the next timestep. Near t=1 the clean guess is divided by sqrt(a)
+with a ~ 1e-4, so the model's error is multiplied by a hundred and the guess lands far
+outside [0, 1]. Clipping it back is correct and necessary - but the noise term was still
+the model's raw output, which corresponds to the unclipped guess. The two halves of the
+update described different pictures. Each step's disagreement is small; sixty of them are
+not.
+
+Fix: clip the guess, then rebuild the noise from the clipped guess, so
+x == sqrt(a)-clean + sqrt(1-a)-noise holds going into the re-mix.
+
+The interesting part is the test. The obvious one - sample at 8 steps and at 64 and
+assert they agree - passes on the broken code, because both versions finish on a clipped
+guess and the final images look alike. Reverting the fix and watching the test still pass
+was the only reason I found that out. What does catch it is asserting the invariant
+directly: step() was pulled out as its own function so the check can take its clean and
+noise, put them back together at the timestep it was given, and demand the original
+picture. That fails by 7.6 on the broken version.
+
+Rule: a regression test written from the symptom can easily miss the cause. Break
+the fix on purpose and confirm the test goes red, or you have not written a regression test.
+
+3.8 Good advice, given to the wrong model
+
+The trainer tells reconstruction models to put a Sigmoid on the end, since pictures live in
+[0, 1]. A diffusion model predicts noise, which is negative half the time, and a
+Sigmoid there would make half its answers unreachable. The check now looks at the range of
+the target rather than the input.
+
+Same shape of mistake in datasetpreview, which decided channels-first by testing
+shape[1] in (1, 3) - a diffusion input has five channels, so it fell through and tried to
+read a 32-pixel axis as colour.
+
+Both are the same lesson: a rule inferred from every dataset that existed at the time.
+
+3.9 Encoding
+
+Two source files were corrupted by editing them through PowerShell's
+Get-Content -Raw | Set-Content -Encoding utf8, which reads as ANSI and writes as UTF-8,
+double-encoding every em-dash. Never edit source through that pipeline. Use the editor
+tooling.
+
+4. Things that were wrong on the first attempt
+
+Global pooling in the classifier examples. Twice - MNIST at 61%, then the shape
+classifier at 63%. Global average pooling collapses every spatial dimension, and for
+"is this a circle or a square" the spatial arrangement is the signal. Flatten head:
+97.7% and 94.2%. Worth remembering as a reflex: global pooling is for when you want
+translation invariance, not when position matters.
+
+Deep dream produced corduroy. Uniform diagonal hatching at any setting. Two causes,
+both fixed:
+Gradient normalised by standard deviation. The original uses mean absolute value, which
+ is far less twitchy when most of the gradient is zero - which after a ReLU it usually is.
+No gradient smoothing. Left alone, the optimiser finds that the cheapest way to excite an
+ edge detector is a one-pixel grating. Blurring the gradient (not the picture) removes
+ that shortcut. This is the single biggest difference between output that looks like
+ something and output that looks like fabric.
+
+Settled by sweeping into a contact sheet and reading the grid as one image, with a
+"% at the rails" figure per tile to make saturation measurable rather than a matter of
+opinion. Result: strength 0.006, featurescale 0.9. strength turned out to be a
+contrast dial - 0.002 gives 1% saturated, 0.04 gives 89%.
+
+Also learned: canvas size does not change feature size. That is set by the receptive
+field, so a bigger canvas simply fits more of them. Said out loud in the node tooltip
+because it is the first thing anyone tries.
+
+Connecting optional inputs by slot index. An optional socket shifts the numbering, so
+ds.connect(0, cap, 1) put a dataset into the images slot and silently connected nothing.
+Always connect by name when building graphs programmatically.
+
+The U-Net was laid out as one long row. Twenty-five nodes in a line, with the skip
+connections running the whole length of the graph and crossing everything on the way. It ran
+correctly and taught nothing. Placed on three levels - encoder descending, bottleneck at the
+bottom, decoder ascending - each skip becomes a horizontal wire at its own resolution, which
+is exactly how the architecture is drawn on paper. The layout is part of the example, not
+decoration: the whole premise of the pack is that an architecture is legible as a picture.
+
+4b. Diffusion, and where the timestep goes
+
+The one thing a diffusion model needs that this pack could not express: it takes two
+inputs, a noisy picture and a timestep. DataBundle holds one x and one y, and Train
+hands a model a single tensor. Supporting multiple inputs properly would ripple through
+training, evaluation, the plots and the compatibility checks.
+
+The timestep rides as extra input channels instead - a couple of planes holding a
+sine/cosine encoding of t, concatenated onto the picture, so a 3-channel image becomes a
+5-channel input. It is a technique real small diffusion models use rather than a dodge, it
+needs no change to the trainer at all, and it is better here: the timestep is visible,
+arriving on the wire, instead of appearing by magic inside every residual block. The node
+tooltip suggests setting timechannels to 0 and watching the model produce mud, which is
+the fastest way to understand why it needs to be there.
+
+The encoding is chosen so t can be recovered from the planes - atan2(sin, cos)/pi - which
+is asserted in the tests and is also what lets the test suite build a perfect oracle model
+for a one-picture world and demand the sampler reproduce that picture exactly.
+
+Multi-input models are still the right thing eventually. This was the version that could ship
+without destabilising everything else.
+
+4c. And then multi-input models, properly
+
+The gap closed. DataBundle grew sidetrain / sideval - further inputs after the first
+ - rather than turning xtrain into a list, which would have broken every call site in the
+pack for no gain. xtrain is still the first input; traininputs / valinputs return
+the whole tuple; single-input datasets have an empty one and behave exactly as before.
+
+The blast radius was smaller than expected and entirely in the consumers: batching in
+fit, evaluate, predict, the confusion matrix, the reconstruction grid, and the
+inspector's sourcetensor. Each was reaching into data.xval directly and calling
+model(x). That is the tell: five places had independently assumed one input, and none of
+them said so.
+
+Two things it unlocked immediately:
+The Siamese example trains. It was architecture-only before, because there was no way
+ to feed two towers. Dataset As Pairs draws matched and mismatched pairs from any labelled
+ dataset, and the example goes from a picture of a network to 98.7% on same-or-different
+ with 658 parameters - one tower's worth, used twice.
+The diffusion timestep can be a real second input rather than extra channels, which is
+ what an actual implementation does: a small vector, projected by a Linear and added onto a
+ feature map. Both modes are kept, because the channel version needs nothing of the model
+ and is the easier first thing to understand.
+
+Forward (Images) deliberately does not support multi-input models - an image batch is
+one input and cannot supply the rest - and says so rather than failing in torch.
+
+5. Where the epoch count went
+
+Observed while watching real runs: the loss plateaus long before the epoch count runs out,
+and the extra epochs are not merely wasted - they overfit, so the model you finish with is
+worse than one you already passed through.
+
+Early stopping now defaults on with a patience of 20 epochs and restores the best
+weights. That changes epochs from a prescription into a ceiling, which is the more
+useful mental model: set it generously and let the run decide when it is done.
+
+6. Hardware reality on the development machine
+
+The GTX 1080 here runs at 240 MHz of a possible 1911 at 87 degrees C - about 12% clock, at
+idle. Every timing in the README is therefore CPU, and examples are sized so that a run
+finishes while you are still interested. This is a machine-specific fault, but it enforced a
+useful discipline: if an example needs a healthy GPU to be bearable, it is a bad example.
+
+7. Testing approach
+
+check.py, 140 checks, most needing no ComfyUI.
+
+The load-bearing one is per-layer round-tripping: trace → build → verify inferred shape
+against a real forward pass → export source → exec it → load the trained weights in →
+assert both models produce the same numbers. If the exported file ever stops being the model
+that ran, that fails.
+
+Error messages are tested as a feature: each assertion checks the message names its layer
+and carries a non-empty hint. Two checks assert a network fails - a single Linear cannot
+solve XOR, and it must not.
+
+Example workflows are validated structurally - every node they reference exists, and every
+saved widget value still fits the schema slot it lands in (section 3.5) - rather than being
+hand-written: they are built and run in the real editor, then serialised out. A hand-written
+workflow JSON is a liability; a serialised one is a record of something that worked.
+
+That is only half of it, though. The structural checks would not have noticed that the
+Trainer's numbers were nonsense, because they were still numbers. What caught it was looking
+at a screenshot. Every figure in the README is now taken from a run of the file it documents,
+and the numbers quoted beside it come from that same run.
+
+7b. Notes and groups in an example
+
+Note and MarkdownNote are frontend-only node types - they are in litegraph's
+registry and not in /objectinfo, so the backend never sees them and they cannot break a
+prompt. LGraphGroup serialises as {id, title, bounding, color, fontsize, flags} and is
+added with graph.add() like a node. Both are therefore available to a workflow built
+programmatically, which is what the diffusion example uses: six markdown notes explaining
+each stage, and six coloured groups drawn round encoder, bottleneck, decoder, data, training
+and sampling.
+
+Worth doing deliberately. An example workflow that explains itself on the canvas is worth
+more than the same graph plus a paragraph in the README, because the reader is looking at
+the canvas.
+
+One consequence for the screenshots: a note's text is a DOM overlay, exactly like the
+image previews (section 8), so it never reaches the canvas bitmap. A capture of the annotated
+workflow is a picture of six empty boxes. The notes are therefore parked outside the frame
+the README figure is cropped to - the figure shows the groups, and the README says the same
+things the notes do.
+
+8. Capturing the graphs
+
+Screenshots of the canvas are taken in-page: fit the graph, resize the canvas backing store,
+toDataURL, and POST the base64 to /api/userdata/shots/<name>.b64, which avoids moving
+images through the conversation. Two things learned:
+LiteGraph culls node text below about 0.6 zoom. A first pass framed the whole U-Net at
+ once and produced a picture of grey rectangles. Anything meant to be read needs scale >= 0.8,
+ which for a wide graph means a canvas several thousand pixels across.
+Node image previews never appear in a toDataURL capture. They do appear in a real
+ screenshot of the page, at any canvas size and any zoom, so they are composited over the
+ LiteGraph canvas rather than drawn into it. The structural figures therefore show wires,
+ widgets and shape badges but no previews; the one screenshot in the README that shows
+ activations rendered on the nodes is a real screen capture.
+
+9. Open
+No scheduler support (cosine, step decay). Would slot into TrainConfig cleanly.
+Nothing produces a labelled multi-input dataset, so a diffusion model still cannot be
+ told which shape to draw. The machinery is there now (section 4c); what is missing is a node that
+ pairs a picture with its class.
+The diffusion example is the slowest thing in the pack at about eight minutes, and its
+ samples are recognisably from the right world rather than recognisably shapes. A bigger
+ model or a longer run fixes it; a bigger model or a longer run is not an example.
+No conditioning of any kind - a diffusion model that could be told which shape to draw
+ needs a label on the wire, which is the same multi-input problem.
+Attention maps and saliency were scoped out of the inspect nodes and remain unbuilt.
+
+Research notes - ComfyUI custom node API (for neurodes)
+
+Ground truth: the local install at C:\Users\dumbass\ComfyUI, ComfyUI 0.17.0, frontend
+package 1.41.20. Everything below was read out of that source tree, not from docs.
+Line references are to that version.
+
+1. The V3 node schema is the target
+
+comfyapi/latest/io.py (85 KB) is the public node API. A V3 node is:
+
+Nodes are stateless classmethods (io.py:1997). No self, no instance state. Optional
+classmethod hooks: validateinputs, fingerprintinputs (= V1 ISCHANGED),
+checklazystatus.
+
+io.Schema fields that matter to us (io.py:1430):
+
+Registration
+
+nodes.py:2248-2295. The loader checks, in this order:
+
+1. WEBDIRECTORY on the module → registers a static web dir. Checked before the
+ V1/V3 branch, so it coexists with a V3 entrypoint.
+2. NODECLASSMAPPINGS → V1 path.
+3. elif comfyentrypoint → V3 path. Must be callable (sync or async), must return a
+ ComfyExtension, whose getnodelist() returns list[type[io.ComfyNode]].
+
+Because it is elif, do not define both NODECLASSMAPPINGS and comfyentrypoint - 
+V1 wins and the V3 nodes silently vanish.
+
+ComfyExtension (comfyapi/latest/init.py:118) also has an async onload() for
+one-time init.
+
+Failure mode to know: exceptions inside comfyentrypoint are swallowed into a
+logging.warning (nodes.py:2291) and the pack just doesn't appear. Any import-time cost
+or error must be avoided - hence lazy torch import.
+
+2. Custom socket types are one line
+
+Custom() (io.py:132) builds a ComfyTypeIO subclass bound to an arbitrary iotype
+string. The frontend assigns a link colour per type name automatically and refuses
+mismatched connections. This is the entire reason the project works: the connection
+rules for a neural network are already enforceable by ComfyUI's own type system.
+
+ComfyUI's own training nodes use exactly this: io.Custom("LOSSMAP") in
+comfyextras/nodestrain.py:1372.
+
+3. Dynamic inputs - three mechanisms, all first class
+
+io.DynamicCombo (io.py:1091)
+
+A combo widget where the selected option decides which further inputs appear on the node.
+
+The value arrives in execute as a flat dict: kind["kind"] is the selected key and
+kind["outfeatures"] is the nested value (confirmed by nodesglsl.py:828,
+sizemode["sizemode"] == "custom" then sizemode["width"]).
+
+This is how a single "Layer" node can morph its parameter set. Real precedent in core:
+comfyextras/nodesglsl.py:772.
+
+io.Autogrow (io.py:953)
+
+Grows a slot as you connect to it. Two templates:
+TemplatePrefix(input, prefix="image", min=1, max=32) → image0, image1, ...
+TemplateNames(input, names=[...], min=...) → fixed name list
+
+Value arrives as dict[str, Any]; iterate .values(), order preserved, unconnected slots
+are None.
+
+Gotcha that decided our Shape design: AutogrowTemplate.init (io.py:963) does
+self.input.forceinput = True for any WidgetInput. So an autogrow of io.Int.Input
+gives you N sockets, never N spinboxes. Autogrow is right for "N tensors into a Concat",
+wrong for "type the 4 numbers of a shape".
+
+io.MatchType (io.py:877)
+
+A generic slot. Inputs and outputs sharing a MatchType.Template("name") resolve to
+whatever concrete type gets connected, with optional allowedtypes. Core uses it for
+Switch (comfyextras/nodeslogic.py:14). Useful for a passthrough/reroute that keeps
+the neurodes type.
+
+Also present: io.MultiType.Input(id, types=[...]) for "accepts A or B", and
+io.DynamicSlot for a socket that reveals sub-inputs when connected.
+
+4. UI feedback from a node
+
+comfyapi/latest/ui.py: PreviewText (:455), PreviewImage (:389), PreviewMask,
+PreviewAudio, PreviewVideo, PreviewUI3D, SavedImages.
+
+Returned via io.NodeOutput(value, ui=ui.PreviewText("[B, 128]")).
+
+Progress during a long node:
+
+and the newer ComfyAPI.Execution.setprogress(value, maxvalue, previewimage=...)
+(comfyapi/latest/init.py:37) which can push a live preview image each step - a
+live-updating loss curve during training is therefore possible.
+
+Interruption: comfy.modelmanagement.throwexceptionifprocessinginterrupted() inside
+the training loop, so Cancel works.
+
+5. Environment facts
+
+ComfyUI's own venv (C:\Users\dumbass\ComfyUI\venv, py3.11.9):
+torch 2.10.0+cu126, torchvision 0.25.0+cu126
+numpy 1.26.4 (not 2.x - avoid numpy-2-only APIs)
+PIL 12.1.1, matplotlib 3.10.8, scipy 1.17.1
+
+System python 3.11.9 has torch 2.11.0+cu126, CUDA available.
+
+Dependency decision: ComfyUI hard-requires torch, numpy and PIL. matplotlib and
+torchvision are present here but are not guaranteed on a user's install (matplotlib is
+almost certainly pulled in by one of the 22 other custom node packs). So neurodes ships
+with zero new requirements: plotting is hand-rolled on PIL, and torchvision datasets
+are an optional import guarded at call time.
+
+Also relevant: this machine's GTX 1080 thermally throttles to ~7% clock, so all defaults
+must be CPU-sane and every example must train in seconds, not minutes.
+
+6. Consequences for neurodes
+
+1. Node graph → symbolic trace, because a V3 execute is a pure classmethod with cached
+ outputs. Real nn.Modules must be built once, at the Model node, not per layer node.
+2. Shape errors can be raised as plain exceptions in execute; ComfyUI surfaces them on
+ the offending node. Message quality is the whole teaching experience.
+3. Layer parameter sets differ wildly between layer types → either N discrete nodes or one
+ DynamicCombo. We do both from one registry.
+4. WEBDIRECTORY lets us ship JS, so inferred shapes can be drawn onto the node body
+ after a run instead of only living in a text preview.
+5. Rerunning training with unchanged inputs would hit the node cache → the training node
+ needs a seed with controlaftergenerate, the ComfyUI-native way to say "go again".

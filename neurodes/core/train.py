@@ -215,6 +215,18 @@ def check_compatibility(model: CompiledModel, data: DataBundle, loss_name: str) 
     last_kind = last_op.kind if last_op else ""
 
     if data.task == "classification":
+        # A language model predicts a class at every *position*, so the target has a time
+        # axis too. Say so plainly when the graph has pooled that axis away, because the
+        # error torch would give instead is about tensor sizes and names nothing.
+        if data.y_train.dim() == 2 and out_shape.rank != data.y_train.dim() + 1:
+            raise NeurodesError(
+                f"Each target is a sequence of {data.y_train.shape[1]} label(s), so the model "
+                f"has to answer at every position — but it returns {out_shape}.",
+                hint="Keep the time axis all the way to the end: a Linear applied to "
+                     f"[B, T, features] gives [B, T, {data.n_classes}], which is one "
+                     "prediction per position. A Reduce or a Global Pool in the middle "
+                     "collapses it.",
+            )
         width = out_shape[-1]
         if width.is_concrete and width.size != data.n_classes:
             if width.size == 1 and data.n_classes == 2:
@@ -299,7 +311,7 @@ def _accuracy(logits: torch.Tensor, targets: torch.Tensor) -> float:
         predicted = (logits.squeeze(-1) > 0).long()
     else:
         predicted = logits.argmax(dim=-1)
-    return (predicted == targets).float().mean().item()
+    return (predicted == targets.reshape(predicted.shape)).float().mean().item()
 
 
 def _prepare_targets(y: torch.Tensor, loss_name: str) -> torch.Tensor:
@@ -308,6 +320,21 @@ def _prepare_targets(y: torch.Tensor, loss_name: str) -> torch.Tensor:
     if loss_name == "binary cross entropy":
         return y.float()
     return y.float()
+
+
+def _flatten_sequence(logits: torch.Tensor, target: torch.Tensor):
+    """One prediction per *position*, folded down to one prediction per row.
+
+    A language model produces ``[batch, time, vocabulary]`` and is scored against
+    ``[batch, time]`` — every position in every sequence is its own classification. Torch's
+    cross entropy wants two dimensions, so the batch and time axes are folded together and
+    the loss is the mean over all of them, which is exactly what it should be.
+
+    Only touches the case it is for: a rank-3 output against a rank-2 whole-number target.
+    """
+    if logits.dim() >= 3 and target.dim() == logits.dim() - 1:
+        return logits.reshape(-1, logits.shape[-1]), target.reshape(-1)
+    return logits, target
 
 
 @torch.no_grad()
@@ -331,13 +358,15 @@ def evaluate(model: CompiledModel, x, y: torch.Tensor, loss_fn,
             continue
         logits = model(*batch)
         target = _prepare_targets(yb, loss_name)
+        if loss_name in ("cross entropy", "nll"):
+            logits, target = _flatten_sequence(logits, target)
         if loss_name == "binary cross entropy" and logits.shape != target.shape:
             target = target.view_as(logits)
         loss = loss_fn(logits, target)
         n = xb.shape[0]
         total_loss += loss.item() * n
         if task == "classification":
-            total_acc += _accuracy(logits, yb.long().view(-1)) * n
+            total_acc += _accuracy(logits, target) * n
         seen += n
     if seen == 0:
         return float("nan"), float("nan")
@@ -402,6 +431,8 @@ def _fit(model: CompiledModel, data: DataBundle, cfg: TrainConfig,
             xb, yb = inputs[0], bundle.y_train[idx]
             logits = model(*inputs)
             target = _prepare_targets(yb, loss_name)
+            if loss_name in ("cross entropy", "nll"):
+                logits, target = _flatten_sequence(logits, target)
             if loss_name == "binary cross entropy" and logits.shape != target.shape:
                 target = target.view_as(logits)
             loss = loss_fn(logits, target)

@@ -1387,6 +1387,206 @@ def _():
 
 
 # ---------------------------------------------------------------------------
+# 6c. Language models
+# ---------------------------------------------------------------------------
+print("\nlanguage")
+
+from neurodes.core import text as TX                  # noqa: E402
+
+
+def _tiny_gpt(data, width=32, heads=4, blocks=1):
+    x = make_input(data.input_shape, name="tokens", dtype="int64")
+    h = apply_layer("embedding", [x], {"vocab_size": data.n_classes, "dim": width})
+    h = apply_layer("learned_positions", [h], {"max_len": data.x_train.shape[1]})
+    h = apply_layer("transformer_block", [h], {"num_heads": heads, "repeat": blocks,
+                                               "causal": True, "ff_mult": 2.0})
+    h = apply_layer("layernorm", [h], {})
+    y = apply_layer("linear", [h], {"units": data.n_classes})
+    return build_model([y], name="NanoGPT")
+
+
+@check("text becomes windows paired with themselves, shifted one along")
+def _():
+    data = TX.text_dataset(text="abcdefghij" * 40, context=8, stride=1, val_fraction=0.2)
+    assert data.task == "classification"
+    assert data.x_train.dim() == 2 and data.y_train.shape == data.x_train.shape
+    assert data.classes == tuple("abcdefghij"), data.classes
+    # The answer at each position is the next character: y[t] == x[t+1].
+    assert torch.equal(data.y_train[0, :-1], data.x_train[0, 1:]), "the shift is wrong"
+    assert TX.config_of(data)["context"] == 8
+    assert TX.decode(data.x_train[0], list(data.classes)) in "abcdefghij" * 5
+
+
+@check("the held-out text is the tail, not a random sample")
+def _():
+    # Windows overlap, so a random split puts nearly the same sequence on both sides and
+    # the validation loss stops meaning anything.
+    body = "".join(chr(ord("a") + i % 20) for i in range(600)) + "ZZZZZZZZZZZZZZZZZZZZ"
+    data = TX.text_dataset(text=body, context=10, stride=1, val_fraction=0.1)
+    tail = TX.decode(data.x_val[-1], list(data.classes))
+    assert "Z" in tail, f"the last validation window should be the end of the text: {tail!r}"
+    assert "Z" not in TX.decode(data.x_train[0], list(data.classes))
+
+
+@check("a sequence target is scored at every position")
+def _():
+    # [batch, time, vocabulary] against [batch, time]: torch's cross entropy wants two
+    # dimensions, so both are folded down and the loss is the mean over every position.
+    logits = torch.randn(4, 7, 11)
+    target = torch.randint(0, 11, (4, 7))
+    flat_logits, flat_target = T._flatten_sequence(logits, target)
+    assert flat_logits.shape == (28, 11) and flat_target.shape == (28,)
+    loss = torch.nn.CrossEntropyLoss()(flat_logits, flat_target)
+    assert torch.isfinite(loss)
+    # And an ordinary classifier is left completely alone.
+    plain = torch.randn(4, 11)
+    same = T._flatten_sequence(plain, torch.randint(0, 11, (4,)))
+    assert same[0].shape == (4, 11) and same[1].shape == (4,)
+
+
+@check("a model that pools the time axis away is told so")
+def _():
+    data = TX.text_dataset(text="abcdefgh" * 60, context=8, stride=2)
+    x = make_input(data.input_shape, name="tokens", dtype="int64")
+    h = apply_layer("embedding", [x], {"vocab_size": data.n_classes, "dim": 16})
+    h = apply_layer("reduce", [h], {"op": "mean", "dim": 1})       # kills the time axis
+    y = apply_layer("linear", [h], {"units": data.n_classes})
+    model = build_model([y], name="Pooled")
+    try:
+        T.check_compatibility(model, data, "cross entropy")
+    except NeurodesError as exc:
+        assert "at every position" in str(exc), str(exc)
+        assert "Reduce" in str(exc.hint), exc.hint
+    else:
+        raise AssertionError("pooling away the time axis has to be caught")
+
+
+@check("causal attention cannot read ahead")
+def _():
+    # The property the whole thing rests on: changing a character can only affect the
+    # predictions that come after it. Without the mask, every position sees the future and
+    # the model learns nothing that generalises to writing.
+    data = TX.text_dataset(text="the quick brown fox jumps over the lazy dog. " * 20,
+                           context=12, stride=1)
+    torch.manual_seed(0)
+    model = _tiny_gpt(data, width=16, heads=2)
+    model.eval()
+    a = data.x_train[:1].clone()
+    b = a.clone()
+    b[0, -1] = (b[0, -1] + 1) % data.n_classes             # change only the LAST character
+    with torch.no_grad():
+        ya, yb = model(a), model(b)
+    early = (ya[0, :-1] - yb[0, :-1]).abs().max().item()
+    assert early < 1e-5, f"an earlier position moved by {early:.2e} when the future changed"
+
+
+@check("without the mask it does read ahead")
+def _():
+    # The complement, so the test above is known to be measuring the mask and not luck.
+    data = TX.text_dataset(text="the quick brown fox jumps over the lazy dog. " * 20,
+                           context=12, stride=1)
+    torch.manual_seed(0)
+    x = make_input(data.input_shape, name="tokens", dtype="int64")
+    h = apply_layer("embedding", [x], {"vocab_size": data.n_classes, "dim": 16})
+    h = apply_layer("self_attention", [h], {"num_heads": 2, "causal": False})
+    y = apply_layer("linear", [h], {"units": data.n_classes})
+    model = build_model([y], name="Leaky")
+    model.eval()
+    a = data.x_train[:1].clone()
+    b = a.clone()
+    b[0, -1] = (b[0, -1] + 1) % data.n_classes
+    with torch.no_grad():
+        ya, yb = model(a), model(b)
+    assert (ya[0, :-1] - yb[0, :-1]).abs().max().item() > 1e-4, \
+        "with causal off, earlier positions should see the change"
+
+
+@check("without the mask it scores brilliantly and learns nothing")
+def _():
+    # The most instructive failure in the pack. With causal off, the answer at each position
+    # is visible one step to the right, so the model copies instead of predicting: the score
+    # goes through the roof and the thing it was supposed to learn is not learned at all.
+    #
+    # Learned Positions is not decoration here. Attention with no positional signal is
+    # permutation-invariant and cannot express "attend one to the right", so it *cannot*
+    # find the shortcut -- the first version of this test scored 31% with the mask off and
+    # looked like the leak did not exist. It needs somewhere to read the position from.
+    data = TX.text_dataset(path=os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "examples", "sample_text.txt"),
+                           context=64, stride=32, val_fraction=0.1, limit=20000)
+    scores = {}
+    for causal in (True, False):
+        torch.manual_seed(0)
+        x = make_input(data.input_shape, name="tokens", dtype="int64")
+        h = apply_layer("embedding", [x], {"num_embeddings": data.n_classes,
+                                           "embedding_dim": 64})
+        h = apply_layer("learned_positions", [h], {"max_len": 64})
+        h = apply_layer("transformer_block", [h], {"num_heads": 4, "repeat": 2,
+                                                   "causal": causal, "ff_mult": 4.0})
+        y = apply_layer("linear", [h], {"units": data.n_classes})
+        hist = T.train(build_model([y], name="G"), data,
+                       T.TrainConfig(epochs=12, batch_size=32, learning_rate=0.003,
+                                     early_stopping=0, seed=0))
+        scores[causal] = hist.val_acc[-1]
+    assert scores[False] > 0.9, \
+        f"with the mask off it should cheat its way to a near-perfect score, got {scores[False]}"
+    assert scores[True] < 0.6, \
+        f"with the mask on it has to actually predict, got {scores[True]}"
+
+
+@check("a language model trains and then writes")
+def _():
+    data = TX.text_dataset(text=TX.SAMPLE, context=32, stride=2, val_fraction=0.15)
+    model = _tiny_gpt(data, width=32, heads=4, blocks=1)
+    hist = T.train(model, data, T.TrainConfig(epochs=8, batch_size=32, learning_rate=0.004,
+                                              early_stopping=0, seed=0))
+    assert hist.train_loss[-1] < hist.train_loss[0], "it should learn something"
+    # Chance is 1/vocabulary; anything above that means it has picked up letter statistics.
+    assert hist.val_acc[-1] > 1.5 / data.n_classes, hist.val_acc[-1]
+
+    written = TX.generate(model, TX.config_of(data), prompt="the ", length=120, seed=1)
+    assert written.startswith("the ") and len(written) == 124, (len(written), written[:40])
+    assert set(written) <= set(data.classes), "it invented a character it has no number for"
+
+
+@check("generation is repeatable, and temperature changes it")
+def _():
+    data = TX.text_dataset(text=TX.SAMPLE, context=16, stride=4)
+    torch.manual_seed(0)
+    model = _tiny_gpt(data, width=16, heads=2)
+    cfg = TX.config_of(data)
+    first = TX.generate(model, cfg, prompt="a", length=60, seed=7)
+    again = TX.generate(model, cfg, prompt="a", length=60, seed=7)
+    assert first == again, "the same seed has to give the same text"
+    cold = TX.generate(model, cfg, prompt="a", length=60, seed=7, temperature=0.05)
+    assert cold != first, "temperature should change what comes out"
+    topk = TX.generate(model, cfg, prompt="a", length=60, seed=7, top_k=3)
+    assert set(topk) <= set(data.classes)
+
+
+@check("a text dataset that is not one says so")
+def _():
+    blobs = D.toy_classification("blobs", n=40, seed=0)
+    try:
+        TX.config_of(blobs)
+    except NeurodesError as exc:
+        assert "Text Dataset" in str(exc.hint), exc.hint
+    else:
+        raise AssertionError("only a text dataset carries a vocabulary")
+
+
+@check("the bundled corpus loads")
+def _():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples",
+                        "sample_text.txt")
+    assert os.path.isfile(path), "examples/sample_text.txt is missing"
+    data = TX.text_dataset(path=path, context=64, stride=16)
+    assert data.n_train > 500, data.n_train
+    assert 40 < data.n_classes < 200, f"{data.n_classes} distinct characters"
+    print(f"       {data.name}, {data.n_train} windows")
+
+
+# ---------------------------------------------------------------------------
 # 7. ComfyUI node schemas, if ComfyUI is available
 # ---------------------------------------------------------------------------
 print("\nnodes")

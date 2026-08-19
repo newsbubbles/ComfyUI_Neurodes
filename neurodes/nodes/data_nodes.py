@@ -8,6 +8,7 @@ from comfy_api.latest import io, ui
 from ..core import data as D
 from ..core import diffuse as DF
 from ..core import prepare as P
+from ..core import text as TX
 from ..core.errors import NeurodesError
 from ..core.shape import Shape
 from .types import Dataset, ShapeType, category
@@ -456,6 +457,20 @@ class NeuroImagePairsDataset(io.ComfyNode):
                              ui=ui.PreviewText(bundle.describe()))
 
 
+def _search_roots() -> list[str]:
+    """Where a bare filename is looked for: ComfyUI's input folder, then the pack's own."""
+    import os
+
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    roots = [os.path.join(here, "examples"), here]
+    try:
+        import folder_paths
+        roots.insert(0, folder_paths.get_input_directory())
+    except Exception:
+        pass
+    return roots
+
+
 def _resolve_folder(folder: str) -> str:
     """Let a relative path mean something sensible.
 
@@ -583,6 +598,68 @@ class NeuroDatasetDiffusion(io.ComfyNode):
                              ui=ui.PreviewText(bundle.describe()))
 
 
+class NeuroTextDataset(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="NeuroTextDataset",
+            display_name="Text Dataset",
+            category=CAT,
+            description="Text, cut into overlapping windows, each paired with itself shifted "
+                        "one character to the left.\n\nThat shift is the entire training "
+                        "objective of a language model: at every position, guess the next "
+                        "character. Nothing is labelled — the text is its own answer.\n\n"
+                        "Characters rather than word tokens, on purpose: the vocabulary is "
+                        "small enough to train on a CPU, there is no tokenizer to install, "
+                        "and you can watch it learn spaces, then word shapes, then real "
+                        "words, in that order.",
+            search_aliases=["gpt", "language model", "nanogpt", "char rnn", "text", "corpus",
+                            "next token", "llm", "shakespeare", "tokens"],
+            inputs=[
+                io.String.Input("text", default="", multiline=True,
+                                tooltip="Paste text here, or leave it empty and give a file "
+                                        "instead. Empty on both uses a short built-in "
+                                        "sample."),
+                io.String.Input("file", default="sample_text.txt",
+                                tooltip="A .txt file. A bare name is looked for in ComfyUI's "
+                                        "input folder and in this pack's examples folder, "
+                                        "where 'sample_text.txt' lives."),
+                io.Int.Input("context", default=64, min=8, max=1024,
+                             tooltip="How many characters the model can see at once. This is "
+                                     "the sequence length, and attention costs its square."),
+                io.Int.Input("stride", default=0, min=0, max=1024,
+                             tooltip="How far apart the windows start. 1 uses every position "
+                                     "and squeezes the most out of a small text; 'context' "
+                                     "uses each character once and is much faster. 0 picks "
+                                     "a quarter of the context.", advanced=True),
+                io.Float.Input("validation_split", default=0.1, min=0.02, max=0.5, step=0.01,
+                               tooltip="Held out from the END of the text, not at random — "
+                                       "the windows overlap, so a random split would put "
+                                       "nearly the same sequence on both sides."),
+                io.Int.Input("limit", default=0, min=0, max=10_000_000,
+                             tooltip="Use only the first N characters. 0 takes all of it.",
+                             advanced=True),
+            ],
+            outputs=[
+                Dataset.Output(display_name="dataset"),
+                ShapeType.Output(display_name="input shape"),
+                io.Int.Output(display_name="vocabulary"),
+                io.String.Output(display_name="characters"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, text: str = "", file: str = "", context: int = 64, stride: int = 0,
+                validation_split: float = 0.1, limit: int = 0) -> io.NodeOutput:
+        bundle = TX.text_dataset(text=str(text), path=str(file).strip().strip('"'),
+                                 context=int(context), stride=int(stride),
+                                 val_fraction=float(validation_split), limit=int(limit),
+                                 search=_search_roots())
+        return io.NodeOutput(bundle, bundle.input_shape, bundle.n_classes,
+                             "".join(bundle.classes),
+                             ui=ui.PreviewText(bundle.describe()))
+
+
 class NeuroDatasetPairs(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -626,4 +703,5 @@ class NeuroDatasetPairs(io.ComfyNode):
 DATA_NODES = [NeuroToyDataset, NeuroCurveDataset, NeuroVisionDataset,
               NeuroDatasetFromImages, NeuroImageFolderDataset, NeuroImagePairsDataset,
               NeuroDatasetAutoencoder, NeuroDatasetImageTask, NeuroDatasetDiffusion,
-              NeuroDatasetPairs, NeuroAugmentDataset, NeuroDatasetInfo]
+              NeuroDatasetPairs, NeuroTextDataset, NeuroAugmentDataset,
+              NeuroDatasetInfo]
