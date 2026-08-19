@@ -583,6 +583,131 @@ One detail the first version got wrong: discs are flat inside, so a patch cut fr
 one becomes exactly zero once its mean is removed, and two unrelated patches then compare
 byte-identical. The train/validation-leakage test accused itself. A trace of grain fixes it.
 
+## 4i. Five state-of-the-art shapes, each shipped with the control that tests it
+
+Examples 16 to 20. Every claim below is measured on a 6,000-image CIFAR-10 slice, not
+quoted from a paper. Three of the five landed somewhere other than the folklore, and in each
+case the interesting part is *why*.
+
+**Residual networks — the gap is a function of depth, and shallow demonstrations prove the
+wrong thing.**
+
+| convolutions | residual | plain | gap |
+|---|---|---|---|
+| 14 | 0.6150 | 0.5945 | +0.021 |
+| 20 | 0.5945 | 0.5680 | +0.027 |
+| 26 | 0.5950 | 0.4760 | +0.119 |
+| 32 | 0.5920 | 0.4660 | +0.126 |
+
+Measured at 14 layers first and nearly wrote "the skip is marginal" — true, useless, and the
+opposite of the point. Read down the columns instead of across: the residual net is flat
+(0.615, 0.595, 0.595, 0.592) and the plain one falls off a cliff between 20 and 26. The
+example uses 26 because it is the shallowest depth where the effect is unmistakable.
+
+`Residual Block` gained a `skip` flag for this, appended so nothing shifts. Off, the
+addition goes and **the 1×1 projection is not built at all** — which is why the plain stack
+has *fewer* weights, 366,938 against 369,690. The better model is bigger because it is
+better. Both counts reproduce a hand-built version exactly, so the control is provably the
+same code path minus one wire.
+
+**Vision transformer — it loses, and the way it loses is the finding.** ViT 0.4390 against a
+plain CNN's 0.5415, with 5.7× the parameters. And a ViT with a fifth of the parameters
+scores 0.4415 — *identical*. It is not short of capacity, it is short of data. A convolution
+gets locality and translation-invariance for free; attention has to learn them from
+examples, and 6,000 is not enough examples.
+
+**Depthwise separable — 539,178 weights to 67,914, for 0.6095 → 0.5925.** The 7.9× is
+arithmetic and cannot vary. The accuracy line is two seeds and is written as "it did not
+collapse" rather than "it cost nothing".
+
+**Inception — 29,578 weights against 82,698, and slightly better.** Variety is cheaper than
+width: the control has to be wide to be expressive and width in a 3×3 costs `in × out × 9`,
+while three of inception's four branches are 1×1 or preceded by one.
+
+**Squeeze-and-excitation — nothing.** 0.6085 with, 0.6150 without, for 5,656 extra
+parameters. Inside the spread and the wrong sign. It stays in example 16 as a documented
+null result, because a workflow that quietly dropped the measurement would imply otherwise.
+
+**Mixture of experts — a claim that died, and a better one underneath it.** A 3-seed run put
+the mixture ahead of a matched dense control by +0.075. At 8 seeds on two devices the gap is
++0.059 on CPU and **−0.021 on CUDA**, against a combined spread of 0.065–0.082: no
+difference in the means, and the sign flips with the device.
+
+What is real is the *spread*. The 51-parameter dense control ranges from **0.457 to 0.741**
+on the seed alone — bimodal, sometimes solving it and sometimes collapsing. The mixture's
+spread is 0.008. At a matched budget routing does not buy a better answer, it buys the same
+answer every time. This is §6's size-matched-noise lesson arriving from a new direction:
+**three seeds is not a measurement of a model whose standard deviation is 0.08.**
+
+Two further things the mixture example says out loud. Purity inside each expert's region is
+0.37–0.51 against a 0.33 floor, because a linear gate cuts the plane into wedges and spiral
+arms cross all of them — it partitions space, not meaning. And on `blobs`, two of four
+experts received zero points: expert collapse, live, with no load-balancing term to stop it.
+The gate is soft, so every expert runs every time and **there is no compute saving at all** —
+the actual reason frontier models use mixtures needs top-k routing, which this pack cannot
+express.
+
+`Decision Boundary` gained a `layer` widget to draw the routing: name a layer and the
+background becomes that layer's argmax, muted so region colours cannot be mistaken for the
+class colours sitting on them. A gate has already been through a softmax, so
+`_as_distribution` passes a distribution through untouched — a second softmax would leave
+the argmax alone but flatten the peak, and the peak is what the confidence fade draws.
+
+## 8c. The autogrow prefix, and a check that was still not enough
+
+§8a added a link check and called the socket problem solved. It was not.
+
+The numbered slots an autogrow input spawns carry a **per-node prefix**. `Build Model` grows
+`outputs.output0`; every variadic *layer* — `Concat`, `Add`, `Multiply` — grows
+`tensors.tensor0`. The generator hardcoded `output` for both. Build Model was right by
+accident and every `Add`, `Multiply` and `Concat` was wrong.
+
+The check from §8a validated only the container root, `tensors`, which exists. So
+`tensors.output0` passed all 189 checks while being unloadable.
+
+What ComfyUI does with it is the dangerous part: it fails validation, **drops the node and
+its entire downstream, and still reports the run a success**. Example 20 "succeeded" in 88
+seconds with only its control branch having run. Example 19 shipped the same way and was
+reported here as working, because only the tail of its log was read and the
+`produced nothing` line prints above the outputs.
+
+Three fixes. The generator now reads `template.prefix` and `template.min` off the schema
+instead of assuming. The check now validates the suffix against the prefix, the index against
+`max`, and the wired count against `min`. And the check was verified by *reintroducing the
+bug* — the first attempt at that test was itself wrong, producing `outputs.tensor0` which
+tripped the older root assertion, so it would have passed without ever exercising the new
+one.
+
+A related trap found the same day: **the server ignores inputs it does not know.** ComfyUI
+loads custom nodes once, at startup, so a running server with stale code silently discarded
+`skip` and `layer` rather than erroring — every `Residual Block` in example 16 trained *with*
+its skip and the comparison was void, while reporting success. Check `/object_info/<node>`
+for a new widget before trusting a run that depends on it.
+
+## 9b. One bit per press
+
+`core/preference.py` learns a parameter mapping from nothing but a human pressing like or
+dislike. Simulated against a hidden taste before any node was written, which was worth doing
+because the defaults it shipped with were wrong in the most embarrassing direction.
+
+**Sixty gradient steps per press measured worse than never training** — error up 0.077,
+memorising a handful of noisy proposals rather than learning. One step per press turns that
+into −0.186. The default is now 1, with the number in the docstring so nobody helpfully turns
+it back up.
+
+**A picky human teaches it less than a generous one.** Tolerance 0.28 improved error by
+0.138; tightening to 0.10 made it 0.022 *worse*, because 1% of proposals were ever liked and
+advantage-weighted regression has nothing to pull towards. Withholding approval starves it.
+
+**It works for a few knobs.** Four outputs 0.341 → 0.101; eight outputs 0.318 → 0.212.
+
+The reward model earns its place — 4 outputs 0.101 → 0.076, 8 outputs 0.212 → 0.181, same
+votes — and then stops. At eight outputs *with* two inputs, a ten-dimensional pair space
+covered by 120 votes, turning the critic on made it worse: −0.083 without, −0.051 with.
+Reward hacking, reproduced small enough to watch. `report()` prints the critic's confidence
+next to how many votes it was fitted on, because from the inside the critic always thinks it
+is going well.
+
 ## 9. Open
 
 - No scheduler support (cosine, step decay). Would slot into `TrainConfig` cleanly.

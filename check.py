@@ -2133,7 +2133,9 @@ else:
             for node in graph["nodes"]:
                 if not node.get("type", "").startswith("Neuro"):
                     continue
-                declared = {i.id for i in schemas[node["type"]].inputs}
+                by_slot = {i.id: i for i in schemas[node["type"]].inputs}
+                declared = set(by_slot)
+                grown: dict[str, list[str]] = {}
                 for inp in node.get("inputs") or []:
                     slot, link = inp["name"], inp.get("link")
                     # A spawned autogrow slot is named "<container>.<something>".
@@ -2141,6 +2143,31 @@ else:
                     assert root in declared, \
                         f"{name}: {node['type']} #{node['id']} has an input {slot!r} that " \
                         f"its schema does not declare. Available: {sorted(declared)}"
+                    if "." in slot:
+                        # Checking only the container was not enough. The numbered slots
+                        # carry a per-node prefix -- Build Model grows 'output0..', every
+                        # variadic layer grows 'tensor0..' -- and a wire on the wrong one
+                        # passes every structural test here while ComfyUI rejects it at
+                        # validation, drops the node and its whole downstream, and still
+                        # reports the run a success. Two examples shipped like that.
+                        template = getattr(by_slot[root], "template", None)
+                        prefix = getattr(template, "prefix", None)
+                        assert prefix, (f"{name}: {node['type']} #{node['id']} has a "
+                                        f"numbered slot {slot!r} but {root!r} is not an "
+                                        "autogrow input")
+                        suffix = slot.split(".", 1)[1]
+                        assert suffix.startswith(prefix) and suffix[len(prefix):].isdigit(), (
+                            f"{name}: {node['type']} #{node['id']} wires {slot!r}, but this "
+                            f"node grows slots named {root}.{prefix}0, {root}.{prefix}1 ... "
+                            "ComfyUI drops the node at validation and still calls the run a "
+                            "success.")
+                        index = int(suffix[len(prefix):])
+                        limit = int(getattr(template, "max", 16) or 16)
+                        assert index < limit, (
+                            f"{name}: {node['type']} #{node['id']} wires {slot!r}, past the "
+                            f"{limit} slots this input grows")
+                        if link is not None:
+                            grown.setdefault(root, []).append(slot)
                     assert inp["type"] != "COMFY_AUTOGROW_V3", (
                         f"{name}: {node['type']} #{node['id']} saved the raw autogrow "
                         f"container {slot!r} as a socket. The frontend spawns numbered "
@@ -2165,6 +2192,13 @@ else:
                         f"{source['type']} #{source['id']} into {node['type']} "
                         f"#{node['id']}'s {slot!r}, which takes {inp['type']}")
                     checked += 1
+                for root, slots in grown.items():
+                    need = int(getattr(getattr(by_slot[root], "template", None),
+                                       "min", 1) or 1)
+                    assert len(slots) >= need, (
+                        f"{name}: {node['type']} #{node['id']} wires {len(slots)} of "
+                        f"{root!r}, which needs at least {need}. ComfyUI treats the "
+                        "missing ones as required and drops the node.")
         print(f"       {checked} wires check out")
 
     @check("the pack entrypoint returns the node list")

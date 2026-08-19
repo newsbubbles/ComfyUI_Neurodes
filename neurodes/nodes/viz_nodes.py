@@ -107,16 +107,32 @@ class NeuroPlotBoundary(io.ComfyNode):
                 io.Int.Input("resolution", default=220, min=40, max=600, advanced=True,
                              tooltip="How finely the plane is sampled."),
                 io.Int.Input("size", default=560, min=240, max=1600, advanced=True),
-            ] + save_inputs("boundary"),
+            ] + save_inputs("boundary") + [
+                # Appended, not inserted: widget values are stored by position, so anything
+                # added ahead of these would shift every value in the saved examples.
+                io.String.Input("layer", default="", advanced=True,
+                                tooltip="Leave empty for the model's own answer.\n\nName a "
+                                        "layer — softmax_1, say — and the background becomes "
+                                        "that layer's argmax instead. On a mixture of experts "
+                                        "that draws which expert owns which part of the "
+                                        "plane. The dots stay coloured by true class, so a "
+                                        "region holding one colour has specialised and a "
+                                        "region holding all of them has only carved up "
+                                        "space."),
+            ],
             outputs=[io.Image.Output(display_name="image")],
             is_output_node=True,
         )
 
     @classmethod
     def execute(cls, model, dataset, resolution: int = 220, size: int = 560,
-                save: bool = False, filename_prefix: str = "") -> io.NodeOutput:
+                save: bool = False, filename_prefix: str = "",
+                layer: str = "") -> io.NodeOutput:
+        layer = (layer or "").strip()
+        if layer:
+            model._step_named(layer)      # fail here, with the list of names
         return _shown(cls, PL.decision_boundary(model, dataset, int(resolution),
-                                                int(size), int(size)),
+                                                int(size), int(size), layer=layer),
                       save=save, filename_prefix=filename_prefix)
 
 

@@ -141,21 +141,42 @@ class Chart:
         self.d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=colour)
 
     def legend(self):
+        """Right-aligned, and wrapped onto as many rows as it takes.
+
+        A single row was laid out from ``right - total``, which goes negative as soon as the
+        entries are wider than the chart -- the leading entries were then drawn off the left
+        edge of the canvas and simply never appeared. Silent, and worst on exactly the plots
+        that carry the most series.
+        """
         if not self._legend:
             return
         pad, box = 8 * SS, 10 * SS
-        entries = self._legend
-        widths = [self.d.textlength(name, font=self.f_small) for name, _ in entries]
-        total = sum(w + box + 3 * pad for w in widths)
-        x = self.right - total - pad
+        entries = [(name, colour, self.d.textlength(name, font=self.f_small))
+                   for name, colour in self._legend]
+        limit = self.right - self.left - 2 * pad
+        rows: list[tuple[list, float]] = []
+        row, used = [], 0.0
+        for item in entries:
+            width = item[2] + box + 3 * pad
+            if row and used + width > limit:
+                rows.append((row, used))
+                row, used = [], 0.0
+            row.append(item)
+            used += width
+        if row:
+            rows.append((row, used))
+
         y = self.top + pad
-        self.d.rectangle([x - pad, y - pad / 2, self.right - pad / 2, y + box + pad / 2],
-                         fill=(24, 25, 30), outline=GRID, width=SS)
-        for (name, colour), w in zip(entries, widths):
-            self.d.rectangle([x, y, x + box, y + box], fill=colour)
-            self.d.text((x + box + 6 * SS, y + box / 2), name, font=self.f_small, fill=TEXT,
-                        anchor="lm")
-            x += box + w + 3 * pad
+        for row, used in rows:
+            x = self.right - used - pad
+            self.d.rectangle([x - pad, y - pad / 2, self.right - pad / 2, y + box + pad / 2],
+                             fill=(24, 25, 30), outline=GRID, width=SS)
+            for name, colour, width in row:
+                self.d.rectangle([x, y, x + box, y + box], fill=colour)
+                self.d.text((x + box + 6 * SS, y + box / 2), name, font=self.f_small,
+                            fill=TEXT, anchor="lm")
+                x += box + width + 3 * pad
+            y += box + 2 * pad
 
     def note(self, text: str):
         self.d.text((self.left, self.top + 6 * SS), text, font=self.f_small, fill=MUTED, anchor="la")
@@ -241,11 +262,33 @@ def accuracy_curve(history, width: int = 720, height: int = 440) -> Image.Image:
 
 
 @torch.no_grad()
+def _as_distribution(v: torch.Tensor) -> torch.Tensor:
+    """Read a layer's output as one probability per category.
+
+    A gate has already been through a softmax. Running a second one over probabilities
+    does not move the argmax, so the regions would be right, but it flattens the peak --
+    and the peak is what the fade draws. A hard 0.97 routing decision would be shaded as
+    though the model were unsure. So: pass a distribution through untouched.
+    """
+    if v.shape[-1] == 1:
+        return torch.cat([1 - torch.sigmoid(v), torch.sigmoid(v)], dim=-1)
+    if v.min() >= 0 and (v.sum(dim=-1) - 1.0).abs().max() < 1e-3:
+        return v
+    return torch.softmax(v, dim=-1)
+
+
 def decision_boundary(model, data, resolution: int = 220, width: int = 560,
-                      height: int = 560) -> Image.Image:
+                      height: int = 560, layer: str = "") -> Image.Image:
     """The whole learned function, drawn.
 
     Only possible for two-dimensional inputs, which is exactly why the toy datasets exist.
+
+    Name a `layer` and the background becomes that layer's argmax instead of the model's
+    answer -- for a mixture-of-experts gate that is a map of which expert owns which part
+    of the plane. The dots stay coloured by their true class either way, so the two can be
+    read against each other: an expert region holding one colour has specialised, a region
+    holding all of them has only carved up space. The region colours are muted so they
+    cannot be mistaken for the class colours they sit under.
     """
     if not data.is_2d_points:
         chart = Chart(width, height, "Decision boundary")
@@ -271,26 +314,38 @@ def decision_boundary(model, data, resolution: int = 220, width: int = 560,
     model.eval()
     logits = []
     for start in range(0, grid.shape[0], 8192):
-        logits.append(model(grid[start:start + 8192].to(device)).cpu())
+        batch = grid[start:start + 8192].to(device)
+        logits.append((model.forward_to(layer, batch) if layer else model(batch)).cpu())
     logits = torch.cat(logits)
-    probs = torch.softmax(logits, dim=-1) if logits.shape[-1] > 1 else \
-        torch.cat([1 - torch.sigmoid(logits), torch.sigmoid(logits)], dim=-1)
+    if logits.dim() != 2:
+        chart = Chart(width, height, "Decision boundary")
+        chart.set_limits(0, 1, 0, 1)
+        chart.frame()
+        chart.note(f"{layer} gives one {list(logits.shape[1:])} block per point, "
+                   "not one value per category")
+        return chart.finish()
+    probs = _as_distribution(logits)
     winner = probs.argmax(dim=-1)
     confidence = probs.max(dim=-1).values
 
+    base = torch.tensor(PANEL, dtype=torch.float32)
     field = torch.zeros(resolution * resolution, 3)
+    region = []
     for k in range(probs.shape[-1]):
         colour = torch.tensor(SERIES[k % len(SERIES)], dtype=torch.float32)
-        mask = winner == k
-        field[mask] = colour
+        if layer:
+            # Muted, so a region cannot be read as the class that shares its colour.
+            colour = base + (colour - base) * 0.55
+        region.append(tuple(int(c) for c in colour.tolist()))
+        field[winner == k] = colour
     # Fade towards the panel colour where the model is unsure: uncertainty becomes visible.
     strength = ((confidence - 1.0 / probs.shape[-1]) / (1 - 1.0 / probs.shape[-1])).clamp(0, 1)
-    base = torch.tensor(PANEL, dtype=torch.float32)
     field = base + (field - base) * (0.25 + 0.45 * strength).unsqueeze(-1)
 
     surface = Image.fromarray(field.reshape(resolution, resolution, 3).byte().numpy(), "RGB")
 
-    chart = Chart(width, height, "Decision boundary", "feature 1", "feature 2")
+    title = f"Decision boundary — {layer}" if layer else "Decision boundary"
+    chart = Chart(width, height, title, "feature 1", "feature 2")
     chart.set_limits(x0, x1, y0, y1)
     chart.frame()
     surface = surface.resize((chart.right - chart.left, chart.bottom - chart.top), Image.BILINEAR)
@@ -306,6 +361,9 @@ def decision_boundary(model, data, resolution: int = 220, width: int = 560,
                             fill=colour, outline=(16, 17, 20), width=SS)
         name = data.classes[k] if k < len(data.classes) else f"class {k}"
         chart._legend.append((name, colour))
+    if layer:
+        for k, colour in enumerate(region):
+            chart._legend.append((f"{layer} · {k}", colour))
     return chart.finish()
 
 

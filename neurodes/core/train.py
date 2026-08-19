@@ -252,6 +252,18 @@ def check_compatibility(model: CompiledModel, data: DataBundle, loss_name: str,
                   "example of one that does."),
         )
 
+    if not layer and len(model.outputs) > 1:
+        # Build Model is happy to keep several outputs and the vision nodes want them, but
+        # the loss is a function of one tensor. Without this the tuple reaches the loss and
+        # dies as an AttributeError several frames deeper, naming nothing the user wrote.
+        raise NeurodesError(
+            f"This model has {len(model.outputs)} outputs, and training scores one of them.",
+            hint="Leave the tensor you want scored wired into Build Model and unwire the "
+                 "rest. To look at an intermediate tensor, keep it out of Build Model and "
+                 "read it with Capture Activations, which runs the model without training "
+                 "it — or name a layer in `layer` to score that layer's own output.",
+        )
+
     actual = list(data.x_train.shape[1:])
     for i, (declared, given) in enumerate(zip(model.input_shapes, data.input_shapes)):
         want = [int(d.size) for d in given.dims[1:]]

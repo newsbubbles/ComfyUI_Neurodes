@@ -82,17 +82,22 @@ class ResidualBlock(nn.Module):
     """
 
     def __init__(self, channels: int, out_channels: int = 0, stride: int = 1,
-                 activation: str = "relu", norm: str = "batch"):
+                 activation: str = "relu", norm: str = "batch", skip: bool = True):
         super().__init__()
         out_channels = out_channels or channels
         self.act = activation
+        self.skip = skip
         self.conv1 = nn.Conv2d(channels, out_channels, 3, stride=stride, padding=1, bias=False)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
         make_norm = (lambda c: nn.BatchNorm2d(c)) if norm == "batch" else \
                     (lambda c: nn.GroupNorm(min(8, c), c)) if norm == "group" else \
                     (lambda c: nn.Identity())
         self.norm1, self.norm2 = make_norm(out_channels), make_norm(out_channels)
-        if stride != 1 or out_channels != channels:
+        # With the skip switched off there is nothing to add the shortcut to, so the
+        # projection is not built at all. That is why a plain stack has *fewer* weights
+        # than a residual one of the same depth, and the difference is exactly the
+        # projections at the two places the channel count changes.
+        if skip and (stride != 1 or out_channels != channels):
             self.shortcut = nn.Sequential(
                 nn.Conv2d(channels, out_channels, 1, stride=stride, bias=False),
                 make_norm(out_channels),
@@ -103,6 +108,8 @@ class ResidualBlock(nn.Module):
     def forward(self, x):
         h = ACTS[self.act](self.norm1(self.conv1(x)))
         h = self.norm2(self.conv2(h))
+        if not self.skip:
+            return ACTS[self.act](h)
         return ACTS[self.act](h + self.shortcut(x))
 
 

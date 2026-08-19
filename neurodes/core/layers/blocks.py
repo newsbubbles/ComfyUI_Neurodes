@@ -167,14 +167,20 @@ layer(
         P("stride", "int", 1, "2 halves the picture and switches the shortcut to a 1x1 convolution.", min=1, max=4),
         P("activation", "combo", "relu", "Which activation to use.", choices=_ACTS),
         P("norm", "combo", "batch", "Which normalisation to use.", choices=("batch", "group", "none")),
+        # Appended, never inserted: widget values are positional in a saved workflow.
+        P("skip", "bool", True,
+          "Off removes the addition and nothing else, leaving two plain convolutions. "
+          "That is the control the ResNet paper is arguing against, and it is worth "
+          "running: at 14 layers it costs about 0.02 accuracy, at 26 it costs 0.12."),
     ),
     build=lambda s, c: modules.ResidualBlock(
         s[0][1].size, out_channels=int(c["out_channels"]), stride=int(c["stride"]),
-        activation=str(c["activation"]), norm=str(c["norm"])),
+        activation=str(c["activation"]), norm=str(c["norm"]), skip=bool(c["skip"])),
     emit_init=lambda s, c: "ResidualBlock({}, {})".format(
         s[0][1].size,
         kwargs_src(out_channels=int(c["out_channels"]), stride=int(c["stride"]),
-                   activation=str(c["activation"]), norm=str(c["norm"]))),
+                   activation=str(c["activation"]), norm=str(c["norm"]),
+                   skip=bool(c["skip"]))),
     helpers=(_ACTS_SRC, inspect.getsource(modules.ResidualBlock)),
 )(_residual_infer)
 
