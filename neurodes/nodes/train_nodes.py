@@ -242,6 +242,21 @@ class NeuroDiscover(io.ComfyNode):
                                          "setting and run again, and without this the "
                                          "second run continues from the first one's kernels "
                                          "instead of starting over."),
+                # Appended, not inserted. A widget added anywhere but the end shifts every
+                # value saved after it in every existing workflow, silently.
+                io.String.Input("layer", default="",
+                                tooltip="Leave empty for a one-layer bank.\n\nName a layer "
+                                        "— conv2d_2, say — and only that layer is trained, "
+                                        "judged by its own output rather than the model's. "
+                                        "That is what lets a stack be taught one layer at a "
+                                        "time: train the first, then chain a second Discover "
+                                        "node naming the next one. The layer below keeps "
+                                        "what it learned, and the new layer has to find "
+                                        "structure in *its* responses — combinations of "
+                                        "edges rather than edges.\n\nIt only means anything "
+                                        "if there is a nonlinearity in between. Two "
+                                        "convolutions with nothing between them collapse "
+                                        "into one convolution."),
             ],
             outputs=[
                 Model.Output(display_name="trained model"),
@@ -255,7 +270,8 @@ class NeuroDiscover(io.ComfyNode):
     def execute(cls, model, dataset, objective: str = "sparse response",
                 diversity: float = 1.0, epochs: int = 120, batch_size: int = 512,
                 learning_rate: float = 0.02, seed: int = 0, early_stopping: int = 0,
-                live_preview: bool = True, reset_weights: bool = True) -> io.NodeOutput:
+                live_preview: bool = True, reset_weights: bool = True,
+                layer: str = "") -> io.NodeOutput:
         import comfy.model_management as mm
         from comfy.utils import ProgressBar
 
@@ -269,6 +285,7 @@ class NeuroDiscover(io.ComfyNode):
         cfg = T.TrainConfig(epochs=int(epochs), batch_size=int(batch_size),
                             learning_rate=float(learning_rate), loss=str(objective),
                             diversity=float(diversity), seed=int(seed),
+                            layer=str(layer).strip(), reset_weights=bool(reset_weights),
                             early_stopping=int(early_stopping))
 
         total = max(1, int(cfg.epochs))
@@ -278,10 +295,12 @@ class NeuroDiscover(io.ComfyNode):
 
         # The diversity term estimates a correlation between every pair of kernels from one
         # batch. With fewer rows than pairs that estimate is mostly noise, and the term ends
-        # up pushing the kernels around at random instead of apart.
-        width = model.output_shapes[0][1]
+        # up pushing the kernels around at random instead of apart. When a layer is named,
+        # the count that matters is that layer's, not the model's last one.
+        shape = DS.shape_at(model, cfg.layer)
+        width = shape[1]
         kernels = width.size if width.is_concrete else 0
-        rows = cfg.batch_size * (1 if model.output_shapes[0].rank == 2 else 4)
+        rows = cfg.batch_size * (1 if shape.rank == 2 else 4)
         if diversity and kernels and rows < 4 * kernels:
             history.notes.append(
                 f"A batch of {cfg.batch_size} is small for {kernels} kernels: the diversity "
@@ -303,9 +322,11 @@ class NeuroDiscover(io.ComfyNode):
                          should_stop=should_stop, history=history)
         pbar.update_absolute(total, total)
 
-        report = (f"{model.model_name}: {model.n_parameters():,} parameters, "
+        scope = (f"layer {cfg.layer} of {model.model_name}" if cfg.layer
+                 else model.model_name)
+        report = (f"{scope}: {model.n_parameters():,} parameters in the model, "
                   f"{objective}, diversity {diversity}\n{result.summary()}\n\n"
-                  + DS.report(model, dataset, float(diversity)))
+                  + DS.report(model, dataset, float(diversity), layer=cfg.layer))
         return io.NodeOutput(model, result, report, ui=ui.PreviewText(report))
 
 

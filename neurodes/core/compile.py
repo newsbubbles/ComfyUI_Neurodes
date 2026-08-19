@@ -118,7 +118,19 @@ class CompiledModel(nn.Module):
     def n_parameters(self, trainable_only: bool = False) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad or not trainable_only)
 
-    def reinitialise(self, seed: int | None = None) -> None:
+    def parameters_of(self, layer: str):
+        """The weights belonging to one named layer, and nothing else.
+
+        Used to train a single layer without touching ``requires_grad`` anywhere. Handing
+        the optimiser a subset is enough: gradients still flow back through the layers above
+        it, they simply never get applied. Switching gradients off instead would mutate the
+        model object, which ComfyUI shares across runs — the failure that costs an hour is
+        two nodes away and looks unrelated.
+        """
+        module = self.module_for(self._step_named(layer).op)
+        return list(module.parameters()) if module is not None else []
+
+    def reinitialise(self, seed: int | None = None, only: str = "") -> None:
         """Throw the weights away and draw new ones.
 
         Needed because ComfyUI caches a node's output: a Build Model node whose widgets have
@@ -133,10 +145,17 @@ class CompiledModel(nn.Module):
 
         A shared layer is one module used at two call sites, and ``modules()`` yields each
         object once, so tied weights stay tied.
+
+        ``only`` restricts it to one named layer, which is what makes a stack trainable a
+        layer at a time: the second Discover node in a chain must not throw away what the
+        first one learned.
         """
         if seed is not None:
             torch.manual_seed(int(seed))
-        for module in self.modules():
+        scope = self.module_for(self._step_named(only).op) if only else self
+        if scope is None:
+            return
+        for module in scope.modules():
             reset = getattr(module, "reset_parameters", None)
             if callable(reset) and module is not self:
                 reset()

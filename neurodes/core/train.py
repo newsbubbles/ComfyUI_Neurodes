@@ -67,6 +67,20 @@ class TrainConfig:
     Turn it off to carry on training a model that is already trained.
     """
 
+    layer: str = ""
+    """Train one named layer alone, judged by that layer's own output.
+
+    Empty trains the whole model against its final output, which is what every supervised
+    task wants. Naming a layer turns this into greedy layer-wise training: the weights of
+    that layer are the only ones the optimiser is given, and the loss is computed on what
+    that layer produces rather than on what the model produces.
+
+    Both halves are load-bearing. Freezing without moving the loss would be end-to-end
+    training with one layer unlocked — a different thing, and it lets the layers above
+    dictate what this one learns. Moving the loss without freezing would let the objective
+    reach down and rewrite the layers below to make its own job easier.
+    """
+
     diversity: float = 0.0
     """How hard to push a bank of filters apart. Only used by the unsupervised objectives.
 
@@ -221,7 +235,8 @@ def loss_src(name: str) -> str:
 # The checks that save an hour
 # ---------------------------------------------------------------------------
 
-def check_compatibility(model: CompiledModel, data: DataBundle, loss_name: str) -> list[str]:
+def check_compatibility(model: CompiledModel, data: DataBundle, loss_name: str,
+                        layer: str = "") -> list[str]:
     """Raise on anything that cannot work; return a note for anything merely suspect."""
     notes: list[str] = []
 
@@ -249,9 +264,18 @@ def check_compatibility(model: CompiledModel, data: DataBundle, loss_name: str) 
                      "Dataset node's shape output to drive it directly.",
             )
 
-    out_shape = model.output_shapes[0]
-    last_op = model.plan[-1].op if model.plan else None
-    last_kind = last_op.kind if last_op else ""
+    if layer:
+        # Training stops at this layer, so everything downstream is irrelevant to whether
+        # the run can work — the shape that has to make sense is the one it produces.
+        from .emit import shapes_by_op
+
+        step = model._step_named(layer)
+        out_shape = shapes_by_op(model.outputs).get(step.op.uid) or model.output_shapes[0]
+        last_op, last_kind = step.op, step.op.kind
+    else:
+        out_shape = model.output_shapes[0]
+        last_op = model.plan[-1].op if model.plan else None
+        last_kind = last_op.kind if last_op else ""
 
     if data.task == "discovery":
         # Nothing to compare against, so the checks are about whether the objective can say
@@ -404,7 +428,8 @@ def _flatten_sequence(logits: torch.Tensor, target: torch.Tensor):
 
 @torch.no_grad()
 def evaluate(model: CompiledModel, x, y: torch.Tensor, loss_fn,
-             loss_name: str, task: str, batch_size: int = 512) -> tuple[float, float]:
+             loss_name: str, task: str, batch_size: int = 512,
+             layer: str = "") -> tuple[float, float]:
     """Mean loss and (for classification) accuracy over a whole split.
 
     ``x`` is one tensor, or a sequence of them for a model that takes several inputs.
@@ -421,7 +446,7 @@ def evaluate(model: CompiledModel, x, y: torch.Tensor, loss_fn,
         yb = y[start:start + batch_size].to(device)
         if xb.shape[0] == 0:
             continue
-        logits = model(*batch)
+        logits = model.forward_to(layer, *batch) if layer else model(*batch)
         target = _prepare_targets(yb, loss_name)
         if loss_name in ("cross entropy", "nll"):
             logits, target = _flatten_sequence(logits, target)
@@ -463,20 +488,28 @@ def _fit(model: CompiledModel, data: DataBundle, cfg: TrainConfig,
     # first makes every run draw from the same stream and land in the same place.
     model.to(device)
     torch.manual_seed(int(cfg.seed))
+    layer = (cfg.layer or "").strip()
+    if layer:
+        # Fails here with the list of names rather than deep inside the loop.
+        model._step_named(layer)
     if cfg.reset_weights:
-        model.reinitialise()
+        model.reinitialise(only=layer)
     loss_name = resolve_loss(cfg.loss, data)
-    notes = check_compatibility(model, data, loss_name)
+    notes = check_compatibility(model, data, loss_name, layer=layer)
 
     bundle = data.to(device)
     loss_fn = make_loss(loss_name, bundle, cfg)
-    optimizer = make_optimizer(cfg.optimizer, model.parameters(), float(cfg.learning_rate),
-                               float(cfg.weight_decay))
-    if not list(model.parameters()):
+    trainable_params = model.parameters_of(layer) if layer else list(model.parameters())
+    if not trainable_params:
         raise NeurodesError(
+            f"'{layer}' has no weights to train." if layer else
             "This model has no trainable weights, so there is nothing to train.",
-            hint="Add at least one layer that has parameters, such as Linear or Conv 2D.",
+            hint="Name a layer that has parameters — a Conv 2D or a Linear. Activations, "
+                 "pools and reshapes have none." if layer else
+                 "Add at least one layer that has parameters, such as Linear or Conv 2D.",
         )
+    optimizer = make_optimizer(cfg.optimizer, trainable_params, float(cfg.learning_rate),
+                               float(cfg.weight_decay))
 
     history = history if history is not None else History()
     history.task, history.loss_name = bundle.task, loss_name
@@ -502,17 +535,20 @@ def _fit(model: CompiledModel, data: DataBundle, cfg: TrainConfig,
             idx = order[start:start + batch]
             inputs = [t[idx] for t in bundle.train_inputs]
             xb, yb = inputs[0], bundle.y_train[idx]
-            logits = model(*inputs)
+            logits = model.forward_to(layer, *inputs) if layer else model(*inputs)
             target = _prepare_targets(yb, loss_name)
             if loss_name in ("cross entropy", "nll"):
                 logits, target = _flatten_sequence(logits, target)
             if loss_name == "binary cross entropy" and logits.shape != target.shape:
                 target = target.view_as(logits)
             loss = loss_fn(logits, target)
-            optimizer.zero_grad(set_to_none=True)
+            # Every parameter, not only the optimiser's: gradients still flow back through
+            # the frozen layers below, and left unzeroed they would pile up there for the
+            # whole run. They are never applied, but they are never cleared either.
+            model.zero_grad(set_to_none=True)
             loss.backward()
             if cfg.grad_clip:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), float(cfg.grad_clip))
+                torch.nn.utils.clip_grad_norm_(trainable_params, float(cfg.grad_clip))
             optimizer.step()
 
             value = loss.item()
@@ -532,9 +568,9 @@ def _fit(model: CompiledModel, data: DataBundle, cfg: TrainConfig,
         if seen:
             train_loss = running / seen
             _, train_acc = evaluate(model, bundle.train_inputs, bundle.y_train, loss_fn,
-                                    loss_name, bundle.task)
+                                    loss_name, bundle.task, layer=layer)
             val_loss, val_acc = evaluate(model, bundle.val_inputs, bundle.y_val, loss_fn,
-                                         loss_name, bundle.task)
+                                         loss_name, bundle.task, layer=layer)
             history.epochs.append(epoch + 1)
             history.train_loss.append(train_loss)
             history.val_loss.append(val_loss)

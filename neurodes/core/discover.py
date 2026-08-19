@@ -288,6 +288,44 @@ def reference_histogram(data: DataBundle) -> torch.Tensor:
 # What came out
 # ---------------------------------------------------------------------------
 
+def shape_at(model, layer: str = ""):
+    """The shape a named layer produces, or the model's output shape when unnamed."""
+    if not layer:
+        return model.output_shapes[0]
+    from .emit import shapes_by_op
+
+    step = model._step_named(layer)
+    return shapes_by_op(model.outputs).get(step.op.uid) or model.output_shapes[0]
+
+
+def activation(model, layer: str, *inputs) -> torch.Tensor:
+    return model.forward_to(layer, *inputs) if layer else model(*inputs)
+
+
+def feeds(model, layer: str) -> str:
+    """The step immediately before ``layer`` in execution order, or '' for the input.
+
+    Needed so that "how loud is this layer" is measured against what actually arrives at
+    it. Measured against the *model's* input instead, the ratio compounds with every layer
+    — the third layer of a stack reads as 134x and looks like the runaway-gain failure when
+    it is only the ordinary accumulation of three layers each a bit louder than its input.
+    """
+    if not layer:
+        return ""
+    names = [model.step_names[s.op.uid] for s in model.plan]
+    index = names.index(layer) if layer in names else 0
+    return names[index - 1] if index > 0 else ""
+
+
+def weight_at(model, layer: str = "") -> tuple[str, torch.Tensor] | tuple[None, None]:
+    """The kernels of a named layer, or of the first layer that has any."""
+    if not layer:
+        return first_weight(model)
+    module = model.module_for(model._step_named(layer).op)
+    weight = getattr(module, "weight", None) if module is not None else None
+    return (layer, weight.detach()) if weight is not None else (None, None)
+
+
 def kernel_overlap(weight: torch.Tensor) -> torch.Tensor:
     """|cosine| between every pair of kernels, diagonal zeroed."""
     flat = weight.detach().reshape(weight.shape[0], -1).float()
@@ -306,7 +344,7 @@ def first_weight(model) -> tuple[str, torch.Tensor] | tuple[None, None]:
 
 
 @torch.no_grad()
-def untrained_floor(model, data, seeds: int = 3, limit: int = 4096) -> dict:
+def untrained_floor(model, data, seeds: int = 3, limit: int = 4096, layer: str = "") -> dict:
     """What this same architecture scores *before* it learns anything.
 
     Necessary, not decorative. These statistics measure non-Gaussianity, and photographs are
@@ -325,8 +363,8 @@ def untrained_floor(model, data, seeds: int = 3, limit: int = 4096) -> dict:
     sp, ku = [], []
     try:
         for s in range(max(1, seeds)):
-            model.reinitialise(seed=9000 + s)
-            r = responses(model(x)).float()
+            model.reinitialise(seed=9000 + s, only=layer)
+            r = responses(activation(model, layer, x)).float()
             sp.append(sparsity(r).mean().item())
             ku.append(kurtosis(r).mean().item())
     finally:
@@ -337,8 +375,8 @@ def untrained_floor(model, data, seeds: int = 3, limit: int = 4096) -> dict:
 
 
 @torch.no_grad()
-def response_pair(model, data: DataBundle, kernel: int = -1,
-                  limit: int = 4096) -> tuple[torch.Tensor, torch.Tensor]:
+def response_pair(model, data: DataBundle, kernel: int = -1, limit: int = 4096,
+                  layer: str = "") -> tuple[torch.Tensor, torch.Tensor]:
     """The trained bank's responses and the untrained ones, for plotting side by side.
 
     ``kernel`` picks one filter; -1 pools them all.
@@ -359,31 +397,37 @@ def response_pair(model, data: DataBundle, kernel: int = -1,
                                 hint=f"Use 0 to {r.shape[1] - 1}, or -1 for all of them.")
         return r[:, kernel]
 
-    after = pick(model(x))
+    after = pick(activation(model, layer, x))
     keep = {k: v.detach().clone() for k, v in model.state_dict().items()}
     try:
-        model.reinitialise(seed=9000)
-        before = pick(model(x))
+        model.reinitialise(seed=9000, only=layer)
+        before = pick(activation(model, layer, x))
     finally:
         model.load_state_dict(keep)
     return after.cpu(), before.cpu()
 
 
 @torch.no_grad()
-def measure(model, data: DataBundle, limit: int = 4096, floor: bool = True) -> dict:
+def measure(model, data: DataBundle, limit: int = 4096, floor: bool = True,
+            layer: str = "") -> dict:
     """Score the trained bank on held-out patches, against its own untrained floor."""
     model.eval()
-    base = untrained_floor(model, data, limit=limit) if floor else None
+    base = untrained_floor(model, data, limit=limit, layer=layer) if floor else None
     x = data.x_val if data.n_val >= 64 else data.x_train
     x = x[:limit].to(model.device)
-    r = responses(model(x)).float()
-    name, weight = first_weight(model)
+    r = responses(activation(model, layer, x)).float()
+    name, weight = weight_at(model, layer)
     overlap = kernel_overlap(weight) if weight is not None else None
     spread = r.std(dim=0)
     median = spread.median().clamp_min(1e-12)
-    # Measured against the input, because a bank can fall silent *together* — the naive
-    # objective's favourite answer — and a purely relative test would call that healthy.
-    loudness = (r.pow(2).mean().sqrt() / x.pow(2).mean().sqrt().clamp_min(1e-8)).item()
+    # Measured against whatever feeds this layer, because a bank can fall silent *together*
+    # — the naive objective's favourite answer — and a purely relative test would call that
+    # healthy. Against the layer's own input rather than the model's, so the number does not
+    # simply accumulate with depth.
+    below = feeds(model, layer)
+    source = activation(model, below, x) if below else x
+    loudness = (r.pow(2).mean().sqrt()
+                / source.pow(2).mean().sqrt().clamp_min(1e-8)).item()
     return {
         "kernels": int(r.shape[1]),
         "samples": int(r.shape[0]),
@@ -399,8 +443,8 @@ def measure(model, data: DataBundle, limit: int = 4096, floor: bool = True) -> d
     }
 
 
-def report(model, data: DataBundle, diversity: float = 0.0) -> str:
-    m = measure(model, data)
+def report(model, data: DataBundle, diversity: float = 0.0, layer: str = "") -> str:
+    m = measure(model, data, layer=layer)
     base = m["floor"]
     lines = [
         f"{m['kernels']} kernels scored on {m['samples']} held-out responses",
@@ -418,7 +462,7 @@ def report(model, data: DataBundle, diversity: float = 0.0) -> str:
                      f"{m['worst_pair']:.3f})")
     lines.append(f"  dead kernels          {m['dead']} of {m['kernels']}")
     lines.append(f"  loudness              {m['loudness']:.3f}      "
-                 "(response size next to the input's)")
+                 f"(response size next to {'what feeds this layer' if layer else 'the input'})")
     lines.append("")
     lines += [f"  {line}" for line in verdict(m, diversity)]
     return "\n".join(lines)
@@ -428,11 +472,13 @@ def verdict(m: dict, diversity: float) -> list[str]:
     """Say the thing the numbers mean, since the loss curve will not say it."""
     out: list[str] = []
     base = m["floor"]
+    learned = False
     if base:
         gained = base["sparsity"] - m["sparsity"]
+        learned = gained > max(0.015, 3 * base["sparsity_sd"])
         # Anything inside a few times the re-initialisation spread is the picture talking,
         # not the training.
-        if gained <= max(0.015, 3 * base["sparsity_sd"]):
+        if not learned:
             out.append(
                 f"These kernels score {m['sparsity']:.3f} and untrained ones score "
                 f"{base['sparsity']:.3f} on the same patches: nothing was learned. The score "
@@ -452,11 +498,14 @@ def verdict(m: dict, diversity: float) -> list[str]:
                    f"{1 / max(m['loudness'], 1e-9):.0f}x smaller than the input. An objective "
                    "that is not scale-invariant can be satisfied by outputting nothing, and "
                    "this one has been.")
-    elif m["loudness"] > 10:
-        out.append(f"The response is {m['loudness']:.0f}x the size of the input. Gain is free "
-                   "to a filter and means nothing about what it detects, so an objective "
-                   "that lets it grow this far is being paid in volume rather than in "
-                   "structure.")
+    elif m["loudness"] > 10 and not learned:
+        # Only a fault when it comes *instead of* structure. A layer partway up a stack is
+        # legitimately several times louder than what feeds it, and saying so there would
+        # be crying wolf at the healthy case.
+        out.append(f"The response is {m['loudness']:.0f}x the size of what feeds it, and "
+                   "nothing was learned. Gain is free to a filter and means nothing about "
+                   "what it detects, so an objective that lets it grow this far is being "
+                   "paid in volume rather than in structure.")
     if not math.isnan(m["overlap"]):
         if m["overlap"] > 0.7:
             out.append(f"The kernels have collapsed: on average each one is {m['overlap']:.0%} "

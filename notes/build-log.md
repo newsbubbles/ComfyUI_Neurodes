@@ -401,6 +401,67 @@ to the end of both trainers' widget lists so no saved workflow shifts. Two detai
 `Evaluate` also had a latent `KeyError` on any unsupervised dataset — it indexed the loss
 table directly rather than going through the constructor.
 
+## 4h. A CNN taught one layer at a time
+
+The single-layer bank of §4f can only ever show what a filter is. Depth is what makes a
+convolutional net worth building, and the failure at the end of §4f turned out to be the way
+in: **deep dream degenerates on a linear model**, because gradient ascent on a linear
+function has no interior maximum. Add a ReLU and a second convolution and there is suddenly
+something to find. The thing that did not work becomes the demonstration of why depth exists.
+
+**One widget, and both halves of it are load-bearing.** `Discover Kernels` gained a `layer`
+field. Naming a layer hands the optimiser *only* that layer's parameters, and moves the loss
+to *that layer's* output. Doing one without the other is a different algorithm:
+
+- freeze without moving the loss → end-to-end training with one layer unlocked, and the
+  layers above dictate what this one learns;
+- move the loss without freezing → the objective reaches down and rewrites the layers below
+  to make its own job easier.
+
+Freezing is done by handing the optimiser a subset of parameters, never by touching
+`requires_grad`. §3.2 is why: the model object is shared across runs, and switching
+gradients off leaves it permanently untrainable somewhere else. The one wrinkle is that
+gradients still flow back through the frozen layers, so `model.zero_grad()` has to clear
+every parameter rather than only the optimiser's, or `.grad` piles up down there for the
+whole run. Never applied, never cleared.
+
+Measured on a portrait, three layers of 16/32/48 kernels:
+
+| layer | sparsity gained on its floor | overlap | draws on |
+|---|---|---|---|
+| conv2d_1 | 0.265 | 0.31 | pixels |
+| conv2d_2 | 0.200 | 0.28 | 3.9 of 16 |
+| conv2d_3 | 0.080 | 0.47 | 6.9 of 32 |
+
+Two things worth having measured rather than assumed. The middle column is the answer to
+"does a second layer learn anything, or just rename the first" — a participation ratio near
+1.0 would mean each kernel reads a single feature below it, and 3.9 means real composition.
+And the gains shrink while the overlap grows, so three layers is where this stops paying at
+this size. That is in the example as a note; the alternative was implying it keeps going.
+
+**The dream defaults were wrong for this and it hid the whole result.** The first pass came
+back as diagonal hatching at every depth — layers 2 and 3 indistinguishable — which looked
+like the ladder not existing. Two settings fixed it:
+
+- **`objective="max"`, not `"mean"`.** Maximising the mean over a whole feature map asks
+  "what makes this filter fire *everywhere*", and the answer is always the cheapest tileable
+  texture. `max` asks what a single unit wants, and the answer is a feature on a blank field.
+  This is the difference between the picture showing depth and not.
+- **`smoothness` 0.4 and a *small* canvas.** 96 pixels, when layer 3's receptive field is
+  60: on a large canvas the feature is a speck.
+
+**Two bugs the work surfaced.** `reset_weights` was in `Discover Kernels`' schema but never
+passed into the config, so the widget did nothing at all. And `loudness` was measured against
+the *model's* input, which compounds with depth — layer 3 read as 134x and tripped the
+runaway-gain warning when nothing was wrong. It is now measured against whatever feeds the
+layer (2.6 / 4.5 / 6.8), and the warning additionally requires that nothing was learned,
+since "paid in volume rather than structure" is only a fault when the structure is missing.
+
+**And the widget-drift bug, for the third time.** `layer` was first added at the *front* of
+the input list, which shifted every saved value in example 14. The alignment check from §3.5
+caught it on the next run, which is the first time that check has paid for itself on a
+mistake made after it was written. New widgets go at the end. Always.
+
 ## 5. Where the epoch count went
 
 Observed while watching real runs: the loss plateaus long before the epoch count runs out,

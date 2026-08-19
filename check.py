@@ -1842,6 +1842,91 @@ def _():
         "with reset_weights off the second run should start from the trained weights"
 
 
+def _ladder(data, widths=(8, 12)):
+    """Conv -> ReLU -> pool -> conv. The ReLU is what makes the second layer worth having."""
+    x = make_input(data.input_shape, name="patch")
+    h = apply_layer("conv2d", [x], {"out_channels": widths[0], "kernel_size": 9, "stride": 1,
+                                    "padding": "valid", "dilation": 1, "groups": 1,
+                                    "bias": False})
+    h = apply_layer("relu", [h], {})
+    h = apply_layer("maxpool2d", [h], {"kernel_size": 2, "stride": 2, "padding": 0})
+    y = apply_layer("conv2d", [h], {"out_channels": widths[1], "kernel_size": 5, "stride": 1,
+                                    "padding": "valid", "dilation": 1, "groups": 1,
+                                    "bias": False})
+    return build_model([y], name="Ladder")
+
+
+@check("training one layer leaves every other layer untouched")
+def _():
+    data = DS.image_patches(_photo(seed=1), patch=36, count=1200, seed=0)
+    model = _ladder(data)
+    cfg = T.TrainConfig(epochs=25, batch_size=256, learning_rate=0.02,
+                        loss="sparse response", diversity=1.0, early_stopping=0, seed=0)
+    T.train(model, data, dataclasses.replace(cfg, layer="conv2d_1"))
+    first = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    T.train(model, data, dataclasses.replace(cfg, layer="conv2d_2"))
+    moved = {k: (v - first[k]).abs().max().item() for k, v in model.state_dict().items()}
+    for k, drift in moved.items():
+        if "conv2d_2" in k:
+            assert drift > 0, f"{k} did not move while it was the layer being trained"
+        else:
+            assert drift == 0.0, \
+                (f"{k} drifted by {drift:.2e} while conv2d_2 was training. Freezing is done "
+                 "by handing the optimiser a subset of parameters — if this moved, the "
+                 "optimiser was given the whole model.")
+
+
+@check("a layer is judged by its own output, not the model's")
+def _():
+    # If the loss were still read off the final layer, training conv2d_1 alone would be
+    # optimising it to serve an untrained conv2d_2 — and the sparsity of conv2d_1's own
+    # responses would barely move.
+    data = DS.image_patches(_photo(seed=1), patch=36, count=1500, seed=0)
+    model = _ladder(data)
+    before = DS.measure(model, data, floor=False, layer="conv2d_1")["sparsity"]
+    T.train(model, data, T.TrainConfig(epochs=40, batch_size=256, learning_rate=0.02,
+                                       loss="sparse response", diversity=1.0,
+                                       early_stopping=0, seed=0, layer="conv2d_1"))
+    after = DS.measure(model, data, floor=False, layer="conv2d_1")["sparsity"]
+    assert before - after > 0.05, \
+        f"conv2d_1's own sparsity only moved {before - after:.3f} — the loss is being read " \
+        "somewhere other than at conv2d_1"
+
+
+@check("the second layer combines the first rather than copying it")
+def _():
+    data = DS.image_patches(_photo(seed=1), patch=36, count=1500, seed=0)
+    model = _ladder(data)
+    for layer in ("conv2d_1", "conv2d_2"):
+        T.train(model, data, T.TrainConfig(epochs=40, batch_size=256, learning_rate=0.02,
+                                           loss="sparse response", diversity=1.0,
+                                           early_stopping=0, seed=0, layer=layer))
+    w = DS.weight_at(model, "conv2d_2")[1]
+    share = w.pow(2).sum(dim=(2, 3))
+    share = share / share.sum(dim=1, keepdim=True)
+    # Participation ratio: 1.0 would mean each layer-2 kernel reads exactly one layer-1
+    # feature, which is a rename rather than a composition.
+    effective = (1.0 / share.pow(2).sum(dim=1)).mean().item()
+    assert effective > 2.0, \
+        f"each layer-2 kernel draws on only {effective:.1f} of {w.shape[1]} layer-1 " \
+        "features — it is relabelling, not composing"
+    print(f"       layer 2 draws on {effective:.1f} of {w.shape[1]} layer-1 features")
+
+
+@check("naming a layer that does not exist lists the ones that do")
+def _():
+    data = DS.image_patches(_photo(), patch=36, count=400, seed=0)
+    model = _ladder(data)
+    for name, expect in (("conv2d_9", "conv2d_9"), ("relu_1", "no weights")):
+        try:
+            T.train(model, data, T.TrainConfig(epochs=1, batch_size=64, layer=name,
+                                               loss="sparse response"))
+        except NeurodesError as exc:
+            assert expect in str(exc) or expect in (exc.hint or ""), str(exc)
+        else:
+            raise AssertionError(f"training layer {name!r} should have been refused")
+
+
 @check("re-initialising keeps shared weights shared")
 def _():
     x = make_input(Shape(["B", 4]), name="a")

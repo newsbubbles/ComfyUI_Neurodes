@@ -4,7 +4,7 @@
 wires, shape inference while you edit, real training, and an ordinary PyTorch file at the
 end.
 
-114 nodes · no new dependencies · 185 automated checks
+114 nodes · no new dependencies · 189 automated checks
 
 ![a CNN being inspected in the editor](examples/screenshots/neurodes_partial_activations.webp)
 
@@ -297,6 +297,7 @@ wall-clock for the whole workflow, including loading the data and drawing the ch
 | `12-mlp-the-oldest-idea` | A plain stack of Linear layers on flattened MNIST, and what throwing away the 2-D structure costs. Annotated. | 235,146 params, 94.1% | 7s |
 | `13-nano-gpt` | **A language model, from nodes.** Causal attention, per-position loss, and it writes. Annotated. | 629,719 params | 2 min |
 | `14-kernels-with-no-teacher` | **No labels, no target, nothing to copy** — one photograph and a statement about what a good filter does. Rediscovers oriented edge detectors. Annotated. | 2,304 params, sparsity 0.62 → 0.55 | 20s |
+| `15-what-each-layer-sees` | **A CNN taught one layer at a time, still with no labels**, then asked what each depth wants to see. The receptive-field ladder, built rather than described. Annotated. | 28,560 params | 2.5 min |
 
 Load one with **Workflow → Open**, or drag the `.json` onto the canvas.
 
@@ -515,6 +516,46 @@ beach, and 0.52 on a screenshot of text — so an untrained bank on the screensh
 better sparsity than a well-trained one on the beach. Every report therefore re-measures the
 floor by re-initialising the model on your own data, and only the gap from it means
 anything.
+
+### And then the same trick, three layers deep
+
+![what each layer wants to see](examples/images/layer-ladder.png)
+
+Name a layer on **Discover Kernels** and only that layer trains, judged by its own output.
+Chain three of them and you have a convolutional net taught one layer at a time with no
+labels anywhere: layer 1 looks at pixels, layer 2 at what layer 1 said, layer 3 at what
+layer 2 said. Each is frozen before the next begins — measured drift on the layers below is
+exactly 0.00.
+
+Then run the network backwards. Pick a unit, start from noise, push the picture uphill until
+that unit is as excited as it can be, and what comes back is a picture of what it is looking
+for. The rows above are that, at each depth: **a bar eleven pixels across, then a patch of
+oriented texture twenty-six across, then a structured region sixty across.** Nobody designed
+that ladder. It is what falls out of stacking one rule three times, and it is the reason
+convolutional nets are built deep rather than wide.
+
+**The first row is the argument for nonlinearity.** A single convolution is linear, and
+gradient ascent on a linear function has no interior maximum — there is no best input, only
+a direction to keep going in, so at the default settings the picture runs to the clamp and
+tells you nothing. Put a ReLU in and stack a second convolution and suddenly there is
+something to find, because a layer-2 unit responds to a *combination* of layer-1 features
+and combinations have best cases. Delete the ReLU nodes and the ladder collapses along with
+them, exactly as the algebra says it must.
+
+**Two Deep Dream settings do almost all the work, and the defaults are wrong for this job.**
+`objective` is `max`, not `mean`: maximising the mean over a whole feature map asks what
+makes a filter fire *everywhere*, and the answer is always the cheapest tileable texture, so
+every layer comes back as diagonal hatching and the depth is invisible. `smoothness` is 0.4,
+not 0, because ascent otherwise discovers that a one-pixel grating is the cheapest way to
+excite an edge detector. Turning `objective` back to `mean` is the most dramatic before-and-
+after in the pack.
+
+**Where it stops paying.** Layer 1 improves sparsity 0.265 on its untrained floor, layer 2
+improves 0.200, layer 3 improves 0.080 — and by layer 3 the kernels have started repeating
+each other (overlap 0.47 against layer 1's 0.31). Three layers is about the end of it at
+this size. The famous "layer 3 finds faces" pictures come from far deeper nets with far
+larger receptive fields trained on millions of images; sixty pixels buys texture, not
+objects, and the example says so.
 
 ---
 
@@ -755,7 +796,7 @@ are on an older copy, nudge the `seed` widget to force a reload.
 python check.py
 ```
 
-185 checks. Most need no ComfyUI at all: shape algebra; every layer's
+189 checks. Most need no ComfyUI at all: shape algebra; every layer's
 infer → build → verify → export → execute → numerically-compare round trip; the error
 messages, asserting each names its layer and carries a usable hint; graph topology; weight
 sharing; training convergence on XOR *including that a network without a hidden layer fails
