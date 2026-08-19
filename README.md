@@ -4,7 +4,7 @@
 wires, shape inference while you edit, real training, and an ordinary PyTorch file at the
 end.
 
-114 nodes · no new dependencies · 184 automated checks
+114 nodes · no new dependencies · 185 automated checks
 
 ![a CNN being inspected in the editor](examples/screenshots/neurodes_partial_activations.webp)
 
@@ -755,7 +755,7 @@ are on an older copy, nudge the `seed` widget to force a reload.
 python check.py
 ```
 
-184 checks. Most need no ComfyUI at all: shape algebra; every layer's
+185 checks. Most need no ComfyUI at all: shape algebra; every layer's
 infer → build → verify → export → execute → numerically-compare round trip; the error
 messages, asserting each names its layer and carries a usable hint; graph topology; weight
 sharing; training convergence on XOR *including that a network without a hidden layer fails

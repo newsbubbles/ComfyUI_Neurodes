@@ -476,6 +476,34 @@ images through the conversation. Two things learned:
   widgets and shape badges but no previews; the one screenshot in the README that shows
   activations rendered on the nodes is a real screen capture.
 
+## 8a. Generating a workflow file, and the three ways it went wrong
+
+Example 14 is emitted by a script that reads the live schemas, rather than hand-written,
+specifically to avoid the widget drift of §3.5. That worked — the widget values were right
+first time — and then the *sockets* were wrong in three separate ways, none of which any
+existing check caught, and all of which the editor showed as a red border on the node.
+
+- **The autogrow container is not a socket.** `Build Model` declares one input of type
+  `COMFY_AUTOGROW_V3`; the frontend spawns numbered slots `outputs.output0`,
+  `outputs.output1` from it and wires go on those. Saving the container itself gives a link
+  whose type is `COMFY_AUTOGROW_V3` where a `NEURO_TENSOR` belongs.
+- **`control_after_generate` has no socket at all.** It appends a combo to `widgets_values`
+  — hence `[1030524549, 'randomize', True]` for two widgets — but never adds an input. The
+  generator emitted a `seed control` input the schema does not declare.
+- **A MultiType socket keeps its whole type list.** An Input's shape is
+  `STRING,NEURO_SHAPE`, because it takes typed text *or* a wire from a dataset. The
+  generator used `get_io_type().split(",")[0]` to decide which widget to draw — correct for
+  that — and reused the truncated string as the socket type, so the editor rejected the wire
+  already attached to it.
+
+The lesson is the same one as §3.5 and it did not transfer: **a workflow JSON has two
+independent surfaces that can drift from the schema, and checking one proves nothing about
+the other.** There is now a link check next to the widget check. It walks every wire in
+every example, asserts the target input exists on the node's schema, that no raw autogrow
+container was saved as a socket, that the link id is in the link table, and that the type
+leaving the source is one the destination accepts — MultiType included. 241 wires, and it
+found all three on the first run.
+
 ## 8b. A synthetic photograph for the tests
 
 The discovery checks need an image with natural-image statistics and no download. The

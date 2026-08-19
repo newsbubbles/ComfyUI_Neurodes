@@ -208,15 +208,6 @@
             "name": "seed"
           },
           "link": null
-        },
-        {
-          "localized_name": "seed control",
-          "name": "seed control",
-          "type": "COMBO",
-          "widget": {
-            "name": "seed control"
-          },
-          "link": null
         }
       ],
       "outputs": [
@@ -342,7 +333,7 @@
         {
           "localized_name": "shape",
           "name": "shape",
-          "type": "STRING",
+          "type": "STRING,NEURO_SHAPE",
           "widget": {
             "name": "shape"
           },
@@ -530,10 +521,16 @@
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "outputs",
-          "name": "outputs",
-          "type": "COMFY_AUTOGROW_V3",
+          "localized_name": "outputs.output0",
+          "name": "outputs.output0",
+          "type": "NEURO_TENSOR",
           "link": 5
+        },
+        {
+          "localized_name": "outputs.output1",
+          "name": "outputs.output1",
+          "type": "NEURO_TENSOR",
+          "link": null
         },
         {
           "localized_name": "name",
@@ -656,15 +653,6 @@
           "type": "INT",
           "widget": {
             "name": "seed"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "seed control",
-          "name": "seed control",
-          "type": "COMBO",
-          "widget": {
-            "name": "seed control"
           },
           "link": null
         },
@@ -1156,7 +1144,7 @@
       1,
       8,
       0,
-      "STRING"
+      "STRING,NEURO_SHAPE"
     ],
     [
       4,
@@ -1172,7 +1160,7 @@
       0,
       10,
       0,
-      "COMFY_AUTOGROW_V3"
+      "NEURO_TENSOR"
     ],
     [
       6,

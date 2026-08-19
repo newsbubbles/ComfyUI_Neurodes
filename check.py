@@ -2027,6 +2027,61 @@ else:
                 checked += 1
         print(f"       {checked} nodes' widget values line up")
 
+    @check("the example workflows' links land on sockets that exist")
+    def _():
+        # The widget check above compares saved *values* against the schema; this compares
+        # saved *wires*. A link stored against a socket the node does not have, or against
+        # the wrong type, loads without complaint and shows up only as a red border on the
+        # node — which is how a broken Build Model shipped: the link sat on the raw
+        # `outputs` autogrow container instead of the `outputs.output0` slot the frontend
+        # spawns from it, so its type was COMFY_AUTOGROW_V3 where a NEURO_TENSOR belonged.
+        import json
+        from neurodes.nodes import ALL_NODES
+
+        schemas = {n.GET_SCHEMA().node_id: n.GET_SCHEMA() for n in ALL_NODES}
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples")
+        checked = 0
+        for name in sorted(f for f in os.listdir(folder) if f.endswith(".json")):
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                graph = json.load(handle)
+            by_id = {n["id"]: n for n in graph["nodes"]}
+            for node in graph["nodes"]:
+                if not node.get("type", "").startswith("Neuro"):
+                    continue
+                declared = {i.id for i in schemas[node["type"]].inputs}
+                for inp in node.get("inputs") or []:
+                    slot, link = inp["name"], inp.get("link")
+                    # A spawned autogrow slot is named "<container>.<something>".
+                    root = slot.split(".")[0]
+                    assert root in declared, \
+                        f"{name}: {node['type']} #{node['id']} has an input {slot!r} that " \
+                        f"its schema does not declare. Available: {sorted(declared)}"
+                    assert inp["type"] != "COMFY_AUTOGROW_V3", (
+                        f"{name}: {node['type']} #{node['id']} saved the raw autogrow "
+                        f"container {slot!r} as a socket. The frontend spawns numbered "
+                        f"slots from it — the wire belongs on {slot}.output0, typed as the "
+                        "element type. The editor shows this as an error on the node.")
+                    if link is None:
+                        continue
+                    edge = next((e for e in graph["links"] if e[0] == link), None)
+                    assert edge is not None, \
+                        f"{name}: {node['type']} #{node['id']} input {slot!r} references " \
+                        f"link {link}, which is not in the link table"
+                    source = by_id.get(edge[1])
+                    assert source is not None, \
+                        f"{name}: link {link} comes from node {edge[1]}, which does not exist"
+                    produced = (source.get("outputs") or [])[edge[2]]["type"]
+                    # A MultiType socket reports every type it will take, comma-separated:
+                    # an Input node's shape slot is "STRING,NEURO_SHAPE" because it accepts
+                    # either typed text or a wire from a dataset.
+                    accepted = [t.strip() for t in inp["type"].split(",")]
+                    assert produced in accepted or "*" in accepted, (
+                        f"{name}: link {link} carries {produced} out of "
+                        f"{source['type']} #{source['id']} into {node['type']} "
+                        f"#{node['id']}'s {slot!r}, which takes {inp['type']}")
+                    checked += 1
+        print(f"       {checked} wires check out")
+
     @check("the pack entrypoint returns the node list")
     def _():
         import asyncio
