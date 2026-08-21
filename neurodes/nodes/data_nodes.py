@@ -61,6 +61,50 @@ class NeuroToyDataset(io.ComfyNode):
                              ui=ui.PreviewText(bundle.describe()))
 
 
+class NeuroArithmeticDataset(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="NeuroArithmeticDataset",
+            display_name="Arithmetic Dataset",
+            category=CAT,
+            description="Two numbers in, one number out — the smallest problem that still "
+                        "needs a hidden layer.\n\nChange the operation and the difficulty "
+                        "changes with it. 'a + b' is a weighted sum of the inputs, which is "
+                        "exactly what a Linear layer computes, so a network with no hidden "
+                        "layer solves it outright. 'a × b' is not, and the same network "
+                        "cannot get near it. One combo turns a solved problem into an "
+                        "impossible one without touching the network.",
+            search_aliases=["multiply", "times", "product", "arithmetic", "regression",
+                            "two inputs", "learn to multiply"],
+            inputs=[
+                io.Combo.Input("operation", options=list(D._ARITHMETIC), default="a × b",
+                               tooltip="What the network has to work out from the two "
+                                       "numbers it is given."),
+                io.Int.Input("points", default=2000, min=64, max=200000),
+                io.Float.Input("noise", default=0.0, min=0.0, max=2.0, step=0.01,
+                               tooltip="Noise added to the answer, not the inputs. Leave at "
+                                       "0 to see how exactly the network can do this."),
+                io.Float.Input("span", default=2.0, min=0.5, max=10.0, step=0.5,
+                               tooltip="Inputs are drawn from -span to +span."),
+                io.Float.Input("validation_split", default=0.25, min=0.05, max=0.5,
+                               step=0.05),
+                io.Int.Input("seed", default=0, min=0, max=1 << 31, control_after_generate=True),
+            ],
+            outputs=[
+                Dataset.Output(display_name="dataset"),
+                ShapeType.Output(display_name="input shape"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, operation: str, points: int, noise: float, span: float,
+                validation_split: float, seed: int) -> io.NodeOutput:
+        bundle = D.arithmetic(operation, points, noise, span, validation_split, seed)
+        return io.NodeOutput(bundle, bundle.input_shape,
+                             ui=ui.PreviewText(bundle.describe()))
+
+
 class NeuroCurveDataset(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -765,7 +809,7 @@ class NeuroImagePatches(io.ComfyNode):
                              ui=ui.PreviewText(bundle.describe()))
 
 
-DATA_NODES = [NeuroToyDataset, NeuroCurveDataset, NeuroVisionDataset,
+DATA_NODES = [NeuroToyDataset, NeuroArithmeticDataset, NeuroCurveDataset, NeuroVisionDataset,
               NeuroDatasetFromImages, NeuroImageFolderDataset, NeuroImagePairsDataset,
               NeuroDatasetAutoencoder, NeuroDatasetImageTask, NeuroDatasetDiffusion,
               NeuroDatasetPairs, NeuroTextDataset, NeuroImagePatches,

@@ -279,6 +279,43 @@ def toy_regression(curve: str = "sine", n: int = 600, noise: float = 0.05,
                       notes="Regression: the network predicts a number, not a class.")
 
 
+_ARITHMETIC = {
+    "a + b": (lambda a, b: a + b, True),
+    "a × b": (lambda a, b: a * b, False),
+    "larger of a, b": (lambda a, b: torch.maximum(a, b), False),
+    "a² + b²": (lambda a, b: a * a + b * b, False),
+}
+"""Each entry says what to compute and whether one Linear layer can do it.
+
+The flag is the whole point of the node. ``a + b`` is a weighted sum of the inputs, which
+is the literal definition of a Linear layer, so a network with no hidden layer and no
+activation gets it exactly. ``a × b`` is not, and the same network cannot do better than a
+plane through the middle of a saddle. Switching one combo turns a solved problem into an
+unsolvable one without touching the network, which is a shorter argument for nonlinearity
+than any amount of prose.
+"""
+
+
+def arithmetic(operation: str = "a × b", n: int = 2000, noise: float = 0.0,
+               span: float = 2.0, val_fraction: float = 0.25, seed: int = 0) -> DataBundle:
+    """Two numbers in, one number out. The smallest problem that still needs a hidden layer."""
+    if operation not in _ARITHMETIC:
+        raise NeurodesError(f"Unknown operation {operation!r}",
+                            hint="Choose one of: " + ", ".join(_ARITHMETIC))
+    fn, linear = _ARITHMETIC[operation]
+    with allocating():
+        g = torch.Generator().manual_seed(int(seed))
+        x = (torch.rand(max(int(n), 8), 2, generator=g) * 2 - 1) * float(span)
+        y = fn(x[:, :1], x[:, 1:2])
+        if noise:
+            y = y + torch.randn(y.shape, generator=g) * float(noise)
+        xt, yt, xv, yv = _split(x, y, val_fraction, g)
+    reach = "A Linear layer on its own can do this exactly." if linear else \
+        "No Linear layer can do this, however many you stack, unless something bends."
+    return DataBundle(xt, yt, xv, yv, "regression", (), name=f"{operation} on [-{span}, {span}]",
+                      notes=f"Regression from two numbers to one. {reach}")
+
+
 # ---------------------------------------------------------------------------
 # Image datasets, if torchvision is around
 # ---------------------------------------------------------------------------

@@ -31,6 +31,22 @@ from neurodes.core.shape import Dim, broadcast, unify
 PASS, FAIL = [], []
 
 
+def example_files(folder: str) -> list[str]:
+    """Every workflow under ``examples/``, subfolders included, as paths relative to it.
+
+    ``examples/tutorials/`` holds the didactic ladders, which are workflows like any other
+    and drift from the schema like any other. A flat ``listdir`` silently stopped checking
+    the moment they existed -- the worst kind of gap, because the count printed by each
+    check still went up as the top-level files grew.
+    """
+    found = []
+    for root, _dirs, names in os.walk(folder):
+        for name in names:
+            if name.endswith(".json"):
+                found.append(os.path.relpath(os.path.join(root, name), folder))
+    return sorted(found)
+
+
 def check(name: str):
     def wrap(fn):
         try:
@@ -2039,7 +2055,7 @@ else:
         from neurodes.nodes import ALL_NODES
         known = {n.GET_SCHEMA().node_id for n in ALL_NODES}
         folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples")
-        files = sorted(f for f in os.listdir(folder) if f.endswith(".json"))
+        files = example_files(folder)
         assert files, "no example workflows"
         for name in files:
             with open(os.path.join(folder, name), encoding="utf-8") as handle:
@@ -2092,7 +2108,7 @@ else:
         schemas = {n.GET_SCHEMA().node_id: n.GET_SCHEMA() for n in ALL_NODES}
         folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples")
         checked = 0
-        for name in sorted(f for f in os.listdir(folder) if f.endswith(".json")):
+        for name in example_files(folder):
             with open(os.path.join(folder, name), encoding="utf-8") as handle:
                 graph = json.load(handle)
             for node in graph["nodes"]:
@@ -2126,7 +2142,7 @@ else:
         schemas = {n.GET_SCHEMA().node_id: n.GET_SCHEMA() for n in ALL_NODES}
         folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples")
         checked = 0
-        for name in sorted(f for f in os.listdir(folder) if f.endswith(".json")):
+        for name in example_files(folder):
             with open(os.path.join(folder, name), encoding="utf-8") as handle:
                 graph = json.load(handle)
             by_id = {n["id"]: n for n in graph["nodes"]}

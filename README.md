@@ -4,7 +4,7 @@
 wires, shape inference while you edit, real training, and an ordinary PyTorch file at the
 end.
 
-114 nodes · no new dependencies · 189 automated checks
+116 nodes · no new dependencies · 189 automated checks
 
 ![a CNN being inspected in the editor](examples/screenshots/neurodes_partial_activations.webp)
 
@@ -305,6 +305,23 @@ wall-clock for the whole workflow, including loading the data and drawing the ch
 | `20-inception-parallel-scales` | **Four kernel sizes at once**, glued back together. Fewer weights than the single-scale control *and* better. | **2.8× fewer** weights, 0.572 vs 0.556 | 2 min |
 
 Load one with **Workflow → Open**, or drag the `.json` onto the canvas.
+
+### `examples/tutorials/` — read downwards instead of across
+
+The twenty above are **arguments**: a claim, and the control that tests it, laid out left to
+right. The tutorials are a different shape — a **ladder**, laid out top to bottom, where
+every rung opens with the question a person actually has at that moment rather than a
+description of the mechanism. You hit Run once, then pan down; each answer provokes the next
+question.
+
+| tutorial | the ladder |
+|---|---|
+| `01-learning-to-multiply` | Two numbers in, their product out. It works; then the smallest possible network fails **completely**; then twenty-one times the parameters fails *identically*, because stacked Linears collapse into one; then any bend at all fixes it; then too little width fails in a visibly *different* way; then the same failed network turns out to be exactly right for `a + b`. |
+
+The last rung is the point of the format: the three-parameter network from section 2 was
+never broken, it was matched to a different problem. **A network is not good or bad, it is
+matched or unmatched to the shape of the problem** — which is the sentence every architecture
+in this pack is an instance of.
 
 Workflows 16 to 20 are the state-of-the-art shapes, and each ships with the control that
 tests its own claim. Three of the five landed somewhere other than the folklore: the vision

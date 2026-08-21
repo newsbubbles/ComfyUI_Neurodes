@@ -136,6 +136,42 @@ class NeuroPlotBoundary(io.ComfyNode):
                       save=save, filename_prefix=filename_prefix)
 
 
+class NeuroPlotSurface(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="NeuroPlotSurface",
+            display_name="Plot Surface",
+            category=CAT,
+            description="Regression from exactly two numbers, drawn as three surfaces over "
+                        "the input plane: what the answer should be, what the model "
+                        "produces, and the difference.\n\nPlot Fit draws a curve, which "
+                        "needs one input. With two there is no curve — and a network that "
+                        "cannot represent a product looks like an ordinary loss number "
+                        "until you see it side by side with the answer, at which point it "
+                        "is obviously a flat plane through a saddle.",
+            search_aliases=["surface", "2d regression", "what it learned", "heatmap",
+                            "two inputs"],
+            inputs=[
+                Model.Input("model"),
+                Dataset.Input("dataset"),
+                io.Int.Input("resolution", default=180, min=40, max=480, advanced=True),
+                io.Int.Input("width", default=900, min=360, max=2400, advanced=True),
+                io.Int.Input("height", default=320, min=200, max=1200, advanced=True),
+            ] + save_inputs("surface"),
+            outputs=[io.Image.Output(display_name="image")],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, model, dataset, resolution: int = 180, width: int = 900,
+                height: int = 320, save: bool = False,
+                filename_prefix: str = "") -> io.NodeOutput:
+        return _shown(cls, PL.regression_surface(model, dataset, int(resolution),
+                                                 int(width), int(height)),
+                      save=save, filename_prefix=filename_prefix)
+
+
 class NeuroPlotFit(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -406,5 +442,6 @@ class NeuroPlotResponses(io.ComfyNode):
 
 
 VIZ_NODES = [NeuroPlotLoss, NeuroPlotAccuracy, NeuroPlotBoundary, NeuroPlotFit,
+             NeuroPlotSurface,
              NeuroPlotConfusion, NeuroPlotWeights, NeuroPlotDataset,
              NeuroPlotReconstruction, NeuroPlotResponses, NeuroTextCard]

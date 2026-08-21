@@ -368,6 +368,89 @@ def decision_boundary(model, data, resolution: int = 220, width: int = 560,
 
 
 @torch.no_grad()
+def regression_surface(model, data, resolution: int = 180, width: int = 900,
+                       height: int = 320) -> Image.Image:
+    """Two numbers in, one out, drawn as a surface: what it should be, what it learned, and
+    the difference.
+
+    ``regression_fit`` draws a curve, which needs a single input. The moment there are two
+    there is no curve to draw, and the failure this is usually used to show -- a network
+    that cannot represent a product -- is invisible in a loss number. Side by side it is
+    obvious: the target is a saddle and the plane the model settled on is flat.
+
+    The first two panels share a colour scale so they can be compared by eye. The third does
+    not, because the error is usually much smaller than the signal and its own scale is the
+    only way to see any structure left in it.
+    """
+    from .render import colormap
+
+    panel = max(width // 3, 160)
+    if data.x_train.dim() != 2 or data.x_train.shape[1] != 2 or data.task != "regression":
+        chart = Chart(width, height, "Surface")
+        chart.set_limits(0, 1, 0, 1)
+        chart.frame()
+        chart.note("only available for regression from exactly two inputs")
+        return chart.finish()
+
+    device = next(model.parameters()).device if list(model.parameters()) else torch.device("cpu")
+    x = torch.cat([data.x_train, data.x_val]).cpu()
+    y = torch.cat([data.y_train, data.y_val]).cpu().reshape(-1)
+    lo0, hi0 = x[:, 0].min().item(), x[:, 0].max().item()
+    lo1, hi1 = x[:, 1].min().item(), x[:, 1].max().item()
+    ga = torch.linspace(lo0, hi0, resolution)
+    gb = torch.linspace(hi1, lo1, resolution)
+    grid = torch.stack(torch.meshgrid(gb, ga, indexing="ij"), dim=-1).reshape(-1, 2)
+    grid = grid[:, [1, 0]].contiguous()
+
+    model.eval()
+    pred = torch.cat([model(grid[s:s + 8192].to(device)).cpu()
+                      for s in range(0, grid.shape[0], 8192)]).reshape(-1)
+    # The target is recomputed from the same grid by nearest-neighbour lookup into the data,
+    # because the dataset knows its own answer and this module must not guess the formula.
+    from .data import _ARITHMETIC
+    truth = None
+    for name, (fn, _) in _ARITHMETIC.items():
+        if name in (data.name or ""):
+            truth = fn(grid[:, :1], grid[:, 1:2]).reshape(-1)
+            break
+    if truth is None:
+        truth = torch.full_like(pred, float("nan"))
+
+    lut = colormap("cold-hot")
+    shared = max(truth[torch.isfinite(truth)].abs().max().item() if torch.isfinite(truth).any()
+                 else 0.0, pred.abs().max().item(), 1e-6)
+
+    def paint(values, scale):
+        # colormap() hands back 0..1, not 0..255. Going straight to .byte() floors the
+        # whole table to zero and every panel comes out black.
+        v = torch.nan_to_num(values / scale, nan=0.0).clamp(-1, 1)
+        idx = ((v + 1) * 0.5 * 255).round().long().clamp(0, 255)
+        rgb = (lut[idx] * 255).reshape(resolution, resolution, 3).byte().numpy()
+        return Image.fromarray(rgb, "RGB")
+
+    error = (pred - truth).abs()
+    finite = error[torch.isfinite(error)]
+    err_scale = max(finite.max().item() if finite.numel() else 1.0, 1e-6)
+    panels = [("what it should be", paint(truth, shared), f"±{shared:.2f}"),
+              ("what it learned", paint(pred, shared), f"±{shared:.2f}"),
+              ("how wrong it is", paint(error, err_scale), f"0 to {err_scale:.2f}")]
+
+    out = Image.new("RGB", (panel * 3, height), BG)
+    for i, (title, surface, scale_text) in enumerate(panels):
+        chart = Chart(panel, height, title, "a", "b")
+        chart.set_limits(lo0, hi0, lo1, hi1)
+        chart.frame()
+        box = (chart.right - chart.left, chart.bottom - chart.top)
+        chart.img.paste(surface.resize(box, Image.BILINEAR), (chart.left, chart.top))
+        chart.d.rectangle([chart.left, chart.top, chart.right, chart.bottom],
+                          outline=AXIS, width=SS)
+        chart.d.text((chart.right, chart.top - 6 * SS), scale_text, font=chart.f_small,
+                     fill=MUTED, anchor="rb")
+        out.paste(chart.finish(), (panel * i, 0))
+    return out
+
+
+@torch.no_grad()
 def regression_fit(model, data, width: int = 720, height: int = 440) -> Image.Image:
     """The learned curve drawn over the training points. One input, one output only."""
     if data.task != "regression" or data.x_train.dim() != 2 or data.x_train.shape[1] != 1:
