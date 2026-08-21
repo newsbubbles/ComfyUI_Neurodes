@@ -36,7 +36,7 @@
       ],
       "size": [
         760,
-        560
+        660
       ],
       "flags": {},
       "order": 1,
@@ -45,7 +45,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "## What is actually being claimed, and at what depth\n\nThe gap is not a constant. It is a function of depth, and at shallow depths it is nearly\nnothing — which is why a demonstration at twelve layers proves the wrong thing.\n\n| convolutions | residual | plain | gap |\n|---|---|---|---|\n| 14 | 0.6150 | 0.5945 | +0.021 |\n| 20 | 0.5945 | 0.5680 | +0.027 |\n| **26** | **0.5950** | **0.4760** | **+0.119** |\n| 32 | 0.5920 | 0.4660 | +0.126 |\n\nRead down the two middle columns rather than across. **The residual network barely moves**\n— 0.615, 0.595, 0.595, 0.592 — it neither gains from depth nor suffers from it. **The plain\nnetwork falls off a cliff** between 20 and 26 layers: 0.595, 0.568, 0.476, 0.466.\n\nThat is the degradation problem, and it is not overfitting: the plain network is worse on\n*training* data too. Extra layers make the thing harder to optimise, and the shortcut is\nwhat removes the difficulty.\n\n26 layers is used here because it is the shallowest depth where the effect is unmistakable\nand the run still finishes in a few minutes."
+        "## What is actually being claimed, and at what depth\n\nThe gap is not a constant. It is a function of depth, and at shallow depths it is nearly\nnothing — which is why a demonstration at twelve layers proves the wrong thing.\n\n| convolutions | residual | plain | gap |\n|---|---|---|---|\n| 14 | 0.6150 | 0.5945 | +0.021 |\n| 20 | 0.5945 | 0.5680 | +0.027 |\n| **26** | **0.5950** | **0.4760** | **+0.119** |\n| 32 | 0.5920 | 0.4660 | +0.126 |\n\nRead down the two middle columns rather than across. **The residual network barely moves**\n— 0.615, 0.595, 0.595, 0.592 — it neither gains from depth nor suffers from it. **The plain\nnetwork falls off a cliff** between 20 and 26 layers: 0.595, 0.568, 0.476, 0.466.\n\nThat is the degradation problem, and it is not overfitting: the plain network is worse on\n*training* data too. Extra layers make the thing harder to optimise, and the shortcut is\nwhat removes the difficulty.\n\n26 layers is used here because it is the shallowest depth where the effect is unmistakable\nand the run still finishes in a few minutes.\n\n**Do not expect to reproduce those exact numbers.** The table averages two seeds; a single\nrun of this workflow lands nearer 0.557 against 0.458. The absolute values move by several\npoints from the seed alone, and two seeds is not enough to say by how much. **The gap is the\nreproducible part** — +0.10 to +0.12 here, and about +0.02 at 14 layers — which is why it is\nthe gap that the argument rests on and not the accuracies."
       ],
       "color": "#432",
       "bgcolor": "#653"

@@ -298,7 +298,7 @@ wall-clock for the whole workflow, including loading the data and drawing the ch
 | `13-nano-gpt` | **A language model, from nodes.** Causal attention, per-position loss, and it writes. Annotated. | 629,719 params | 2 min |
 | `14-kernels-with-no-teacher` | **No labels, no target, nothing to copy** — one photograph and a statement about what a good filter does. Rediscovers oriented edge detectors. Annotated. | 2,304 params, sparsity 0.62 → 0.55 | 20s |
 | `15-what-each-layer-sees` | **A CNN taught one layer at a time, still with no labels**, then asked what each depth wants to see. The receptive-field ladder, built rather than described. Annotated. | 28,560 params | 2.5 min |
-| `16-residual-networks` | **The skip connection, with its own control.** Twenty-six convolutions twice over, identical but for one switch. Annotated. | 0.595 vs **0.476** | 10 min |
+| `16-residual-networks` | **The skip connection, with its own control.** Twenty-six convolutions twice over, identical but for one switch. Annotated. | gap **+0.10** (0.557 vs 0.458) | 8 min |
 | `17-vision-transformer` | **An image cut into 64 words** — the patch embedding is a conv whose stride equals its kernel. Beaten by a plain CNN, which is the point. Annotated. | 0.439 vs CNN **0.542** | 15 min |
 | `18-depthwise-separable` | **One convolution split in two.** `groups` doing the whole of MobileNet. | **7.9× fewer** weights, 0.593 vs 0.610 | 4 min |
 | `19-mixture-of-experts` | **A gate that decides who answers**, with the routing drawn on the plane. Two controls, and a claim that did not survive them. Annotated. | 48 params, 0.662 | 35s |
